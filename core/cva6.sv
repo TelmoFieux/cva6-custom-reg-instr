@@ -94,14 +94,16 @@ module cva6
 
     // ID/EX/WB Stage
     localparam type scoreboard_entry_t = struct packed {
+      logic [CVA6Cfg.RegAddrWidth-1:0] old_phys; //previous rat pointer that hold the current value of rd
+      logic [CVA6Cfg.RegAddrWidth-1:0] arch_rd; //architectural destination register. Usefull to update commit_rat
       logic [CVA6Cfg.VLEN-1:0] pc;  // PC of instruction
       logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;      // this can potentially be simplified, we could index the scoreboard entry
       // with the transaction id in any case make the width more generic
       fu_t fu;  // functional unit to use
       fu_op op;  // operation to perform in each functional unit
-      logic [REG_ADDR_SIZE-1:0] rs1;  // register source address 1
-      logic [REG_ADDR_SIZE-1:0] rs2;  // register source address 2
-      logic [REG_ADDR_SIZE-1:0] rd;  // register destination address
+      logic [CVA6Cfg.RegAddrWidth-1:0] rs1;  // register source address 1
+      logic [CVA6Cfg.RegAddrWidth-1:0] rs2;  // register source address 2
+      logic [CVA6Cfg.RegAddrWidth-1:0] rd;  // register destination address
       logic [CVA6Cfg.XLEN-1:0] result;  // for unfinished instructions this field also holds the immediate,
       // for unfinished floating-point that are partly encoded in rs2, this field also holds rs2
       // for unfinished floating-point fused operations (FMADD, FMSUB, FNMADD, FNMSUB)
@@ -513,6 +515,10 @@ module cva6
   // --------------
   scoreboard_entry_t [CVA6Cfg.NrCommitPorts-1:0] commit_instr_id_commit;
   logic [CVA6Cfg.NrCommitPorts-1:0] commit_drop_id_commit;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_old_phys_i_commit;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_new_phys_i_commit;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_rd_i_commit;
+  fu_op [CVA6Cfg.NrCommitPorts-1:0] commit_op_i_commit;
   logic [CVA6Cfg.NrCommitPorts-1:0] commit_ack_commit_id;
 
   // --------------
@@ -523,10 +529,17 @@ module cva6
   // --------------
   // COMMIT <-> ID
   // --------------
-  logic [CVA6Cfg.NrCommitPorts-1:0][4:0] waddr_commit_id;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_commit_id;
   logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_commit_id;
   logic [CVA6Cfg.NrCommitPorts-1:0] we_gpr_commit_id;
   logic [CVA6Cfg.NrCommitPorts-1:0] we_fpr_commit_id;
+
+  // --------------
+  // ISSUE <-> CONTROLLER
+  // --------------
+
+  logic rollback_en_controller;
+
   // --------------
   // CSR <-> *
   // --------------
@@ -896,13 +909,18 @@ module cva6
       .commit_instr_o       (commit_instr_id_commit),
       .commit_drop_o        (commit_drop_id_commit),
       .commit_ack_i         (commit_ack_commit_id),
+      .commit_old_phys_i    (commit_old_phys_i_commit),
+      .commit_new_phys_i    (commit_new_phys_i_commit),
+      .commit_rd_i          (commit_rd_i_commit),
+      .commit_op_i          (commit_op_i_commit),
       // Performance Counters
       .stall_issue_o        (stall_issue),
       //RVFI
       .rvfi_issue_pointer_o (rvfi_issue_pointer),
       .rvfi_commit_pointer_o(rvfi_commit_pointer),
       .rvfi_rs1_o           (rvfi_rs1),
-      .rvfi_rs2_o           (rvfi_rs2)
+      .rvfi_rs2_o           (rvfi_rs2),
+      .rollback_en_o        (rollback_en_controller)
   );
 
   // ---------
@@ -1068,6 +1086,10 @@ module cva6
       .commit_instr_i    (commit_instr_id_commit),
       .commit_drop_i     (commit_drop_id_commit),
       .commit_ack_o      (commit_ack_commit_id),
+      .commit_old_phys_o (commit_old_phys_i_commit),
+      .commit_new_phys_o (commit_new_phys_i_commit),
+      .commit_rd_o       (commit_rd_i_commit),
+      .commit_op_o       (commit_op_i_commit),
       .commit_macro_ack_o(commit_macro_ack),
       .waddr_o           (waddr_commit_id),
       .wdata_o           (wdata_commit_id),
@@ -1271,7 +1293,8 @@ module cva6
       .hfence_vvma_i         (hfence_vvma_commit_controller),
       .hfence_gvma_i         (hfence_gvma_commit_controller),
       .flush_commit_i        (flush_commit),
-      .flush_acc_i           (flush_acc)
+      .flush_acc_i           (flush_acc),
+      .rollback_en_i         (rollback_en_controller)
   );
 
   // -------------------
@@ -1284,7 +1307,7 @@ module cva6
   dcache_req_o_t [NumPorts-1:0] dcache_req_from_cache;
 
   // D$ request
-  // Since ZCMT is only enable for embdeed class so MMU should be disable. 
+  // Since ZCMT is only enable for embdeed class so MMU should be disable.
   // Cache port 0 is being ultilize in implicit read access in ZCMT extension.
   if (CVA6Cfg.RVZCMT & ~(CVA6Cfg.MmuPresent)) begin
     assign dcache_req_to_cache[0] = dcache_req_ports_id_cache;
