@@ -20,16 +20,14 @@
 //
 // Description:    This register file is optimized for implementation on
 
-
-
 module tournament_tree #(
     parameter int unsigned           ID_SIZE       = 8,
     parameter int unsigned           NR_PLAYER     = 16,
 ) (
     input  logic  [NR_PLAYER-1:0]                           valid_i, // is player ready
     input  logic  [NR_PLAYER-1:0][ID_SIZE-1:0]              seq_num_i, // player tag
-    input  logic  [NR_PLAYER-1:0][$clog2(NR_PLAYER)-1:0]      id_i, // player id
-    output logic  [$clog2(NR_PLAYER)-1:0]                     winner_o,
+    input  logic  [NR_PLAYER-1:0][$clog2(NR_PLAYER)-1:0]    id_i, // player id
+    output logic  [$clog2(NR_PLAYER)-1:0]                   winner_o,
     output logic                                            winner_valid_o
 );
   localparam int unsigned TREE_SIZE = NR_PLAYER*2;

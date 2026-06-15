@@ -29,20 +29,16 @@ module reservation_station
     parameter int unsigned           DATA_WIDTH    = 32,
     parameter int unsigned           NR_READ_PORTS = 2,
     parameter int unsigned           ADDR_WIDTH    = 5,
-    parameter int unsigned           NR_RS_ENTRIES = 3,
+    parameter int unsigned           NR_RS_ENTRIES = 4,
+    parameter int unsigned           FPR_ENABLED   = 0,
     parameter type scoreboard_entry_t = logic
 ) (
     input logic                                               clk_i,
     input logic                                               rst_ni,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    we_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0]                    commit_valid_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_rd_i,
-    input fu_op [CVA6Cfg.NrIssuePorts-1:0]                    commit_op_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_new_phys_i,
-    input logic [ADDR_WIDTH-1:0]                              rollback_rd_i, // architectural register to rollback
-    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // architectural register to rollback
-    input logic                                               rollback_we_i, // rollback is enabled
+    input fu_op                                               rm_op_i, // op of the entry to remove
+    input logic                                               rm_i, // do we remove the entry
+    input logic [CVA6Cfg.GlobalRsIdWidth-1:0]                 rm_id_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
@@ -54,23 +50,21 @@ module reservation_station
 
   typedef struct packed {
     scoreboard_entry_t [NR_RS_ENTRIES-1:0] rs_table;
-    logic [NR_RS_ENTRIES-1:0] free_regs;
+    logic [NR_RS_ENTRIES-1:0] free_entries;
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
-    //logic [NR_RS_ENTRIES-1:0][ADDR_WIDTH-1:0] regs_required;
   } reservation_station_t;
 
   logic [NUM_REG-1:0] is_result_available_gpr_n, is_result_available_gpr_q;
 
-  //fp operation might use gpr regs. So we need to keep track of both
-  //register banks and hazard
-  if (CVA6Cfg.FpPresent) begin
+  //some operations might use gpr and fpr register as operands or destination
+  if (FPR_ENABLED) begin
     logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
   end
 
-  logic [NR_RS_ENTRIES-1:0] free_regs_masked [CVA6Cfg.NrIssuePorts:0];
+  logic [NR_RS_ENTRIES-1:0] free_entries_masked [CVA6Cfg.NrIssuePorts:0];
   logic [$clog2(NR_RS_ENTRIES):0] alloc_idx    [CVA6Cfg.NrIssuePorts-1:0];
 
-  assign free_regs_masked[0] = rs_q.free_regs;
+  assign free_entries_masked[0] = rs_q.free_entries;
 
   //priority encoder cascade to get free index in RS
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
@@ -78,15 +72,39 @@ module reservation_station
           .WIDTH(NUM_REG),
           .MODE(1'b0))
       i_lzc (
-          .in_i   (free_regs_masked[i]),
+          .in_i   (free_entries_masked[i]),
           .cnt_o  (alloc_idx[i]),
           .empty_o()
       );
 
-      assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) ?
-        (free_regs_masked[i] & ~(NR_RS_ENTRIES'(1) << alloc_idx[i])) :
-        free_regs_masked[i];
+      assign free_entries_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) ?
+        (free_entries_masked[i] & ~(NR_RS_ENTRIES'(1) << alloc_idx[i])) :
+        free_entries_masked[i];
   end
+
+  logic [NR_RS_ENTRIES-1:0] tournament_valid;
+  logic [NR_RS_ENTRIES-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num;
+  logic [NR_RS_ENTRIES-1:0][$clog2(NR_RS_ENTRIES)-1:0] tournament_id;
+
+  for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
+    assign tournament_valid[i] = rs_q.valid_regs[i] == '1 ? 1'b1 : 1'b0;
+    assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
+    assign tournament_id[i] = i;
+  end
+
+  tournament_tree #(
+      .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
+      .NR_PLAYER(NR_RS_ENTRIES)
+  i_tournament_tree (
+      .valid_i    (tournament_valid),
+      .seq_num_i  (tournament_seq_num),
+      .id_i       (tournament_id),
+      .winner_o,
+      .winner_valid_o
+  );
+
+  assign decoded_instr_o = rs_q.rs_table[winner_o];
+  assign decoded_instr_valid_o = winner_valid_o;
 
   reservation_station_t rs_n, rs_q;
 
@@ -94,7 +112,7 @@ module reservation_station
     rs_n = rs_q;
     is_result_available_gpr_n = is_result_available_gpr_q;
 
-    if (CVA6Cfg.FpPresent) begin
+    if (FPR_ENABLED) begin
       is_result_available_fpr_n = is_result_available_fpr_q;
     end
 
@@ -102,87 +120,108 @@ module reservation_station
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
         rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
-        if (CVA6Cfg.FpPresent) begin
+      end
+
+      //always update dependency
+      if (FPR_ENABLED) begin
           if (is_rd_fpr(decoded_instr_i[i].op)) begin
-            is_result_available_fpr_n[alloc_idx[i]] = 1'b0;
+            is_result_available_fpr_n[decoded_instr_i[i].rd] = 1'b0;
           end else begin
-            is_result_available_gpr_n[alloc_idx[i]] = 1'b0;
+            is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
           end
         end else begin
-          is_result_available_gpr_n[alloc_idx[i]] = 1'b0;
+          is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
         end
+      end
+    end
+
+
       // In case of superscalar config, we check RAW hazard.
       // Current method only work up to 2 issue port
 
-    if (!CVA6Cfg.FpPresent) begin
-      rs_n.valid_regs[i][0] = (i == 0 || decoded_instr_i[i].rs1 != decoded_instr_i[i-1].rd) ?
-        is_result_available_gpr_n[decoded_instr_i[i].rs1] : 1'b1;
-      rs_n.valid_regs[i][1] = (i == 0 || decoded_instr_i[i].rs2 != decoded_instr_i[i-1].rd) ?
-        is_result_available_gpr_n[decoded_instr_i[i].rs2] : 1'b1;
-      if (NR_READ_PORTS == 3 && !decoded_instr_i[i].use_imm) begin
-        rs_n.valid_regs[i][2] = (i == 0 || decoded_instr_i[i].rs3 != decoded_instr_i[i-1].rd) ?
-          is_result_available_gpr_n[decoded_instr_i[i].rs3] : 1'b1;
-      end
-    end else begin
-      rs_n.valid_regs[i][0] = (i == 0 || decoded_instr_i[i].rs1 != decoded_instr_i[i-1].rd)
-        ? (is_rs1_fpr(decoded_instr_i[i].op)
-        ? is_result_available_fpr_n[decoded_instr_i[i].rs1]
-        : is_result_available_gpr_n[decoded_instr_i[i].rs1])
-        : 1'b1;
-      rs_n.valid_regs[i][1] = (i == 0 || decoded_instr_i[i].rs2 != decoded_instr_i[i-1].rd)
-        ? (is_rs2_fpr(decoded_instr_i[i].op)
-        ? is_result_available_fpr_n[decoded_instr_i[i].rs2]
-        : is_result_available_gpr_n[decoded_instr_i[i].rs2])
-        : 1'b1;
-      if (NR_READ_PORTS == 3 && !decoded_instr_i[i].use_imm) begin
-        rs_n.valid_regs[i][2] = (i == 0 || decoded_instr_i[i].result != decoded_instr_i[i-1].rd)
-          ? (is_imm_fpr(decoded_instr_i[i].op)
-          ? is_result_available_fpr_n[decoded_instr_i[i].result]
-          : is_result_available_gpr_n[decoded_instr_i[i].result])
-          : 1'b1;
-      end
-    end
+    for
 
-    //updating table after commit
-    rs_n.free_regs = free_regs_masked[CVA6Cfg.NrIssuePorts];
-    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (commit_valid_i[i] && ((is_rd_fpr(commit_op_i) && FPR_RAT==1'b1) || (!is_rd_fpr(commit_op_i) && FPR_RAT==1'b0))) begin
-        rat_n.free_regs[commit_old_phys_i[i]] = 1'b1; //freeing old reg
-        //locking new reg. Useless for issue rat but necessary for commit rat
-        rat_n.free_regs[commit_new_phys_i[i]] = 1'b0;
-        if (COMMIT_RAT == 1'b1 && commit_rd_i[i] != '0) begin
-          rat_n.rat[commit_rd_i[i]] = commit_new_phys_i[i];
+    //removing instr after it was sent to ex stage or because of rollback
+    rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
+    for (int i = 0; i < NR_RS_ENTRIES; i++) begin
+      if (rm_i && rm_id_i == rs_q.rs_table[i].global_rs_id) begin
+        rs_n.free_entries[i] = 1'b1;
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(rm_op_i)) begin
+            is_result_available_fpr_n[rs_q.rs_table[i].rd] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
         end
       end
 
+      //in case of newly added instruction we need to check
+      //RAW hazard if 2 instruction are added the same cycle
+      //Current method only work for 2 issue ports
 
-    end
-    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
-        rat_n.rat[decoded_instr_i[i].rd] = alloc_idx[i];
+      if (we_i == '1) begin
+        for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
+          if (!FPR_ENABLED) begin
+            rs_n.valid_regs[i][0] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rs1 == decoded_instr_i[j-1].rd) ? 1'b0) : is_result_available_gpr_q[decoded_instr_i[j].rs1];
+            rs_n.valid_regs[i][1] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rs2 == decoded_instr_i[j-1].rd) ? 1'b0) : is_result_available_gpr_q[decoded_instr_i[j].rs2];
+            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+              rs_n.valid_regs[i][0] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].result == decoded_instr_i[j-1].rd) ? 1'b0) : is_result_available_gpr_q[decoded_instr_i[j].result];
+            end
+          end else begin
+            rs_n.valid_regs[i][0] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rd == decoded_instr_i[j-1].rd && is_rs1_fpr(decoded_instr_i[j].op) && is_rd_fpr(decoded_instr_i[j-1])) ? 1'b0)
+            : is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[i].rs1];
+            rs_n.valid_regs[i][1] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rs2 == decoded_instr_i[j-1].rd && is_rs2_fpr(decoded_instr_i[j].op) && is_rd_fpr(decoded_instr_i[j-1])) ? 1'b0)
+            : is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[i].rs2];
+            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+              rs_n.valid_regs[i][2] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].result == decoded_instr_i[j-1].rd && is_imm_fpr(decoded_instr_i[j].op) && is_rd_fpr(decoded_instr_i[j-1])) ? 1'b0)
+              : is_imm_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[i].result];
+          end
+        end
+      end else if (we_i != '0) begin
+        for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
+          if (!FPR_ENABLED) begin
+            rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            rs_n.valid_regs[i][1] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
+            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+              rs_n.valid_regs[i][2] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+            end
+          end else begin
+            rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_rs1_fpr(decoded_instr_i[j].rs1) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
+            : is_rs1_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            rs_n.valid_regs[i][1] = (i == alloc_idx[j]) ? (is_rs2_fpr(decoded_instr_i[j].rs2) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
+            : is_rs2_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+              rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_imm_fpr(decoded_instr_i[j].result) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
+              : is_imm_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+            end
+          end
+        end
       end
     end
 
-    //rollback
-    if(rollback_we_i) begin
-      rat_n.free_regs[rat_n.rat[rollback_rd_i]] = 1'b1;
-      rat_n.rat[rollback_rd_i] = rollback_old_phys_i;
+
     end
 
-    if (rat_restore_en_i) begin
-      rat_n = rat_restore_state_i;
+    if (rs_restore_en_i) begin
+      rs_n.free_entries = '1;
     end
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      rat_q.free_regs <= NUM_REG'('1) << 32;
-      for (int i = 0; i < 32; i++) begin
-        rat_q.rat[i] <= ADDR_WIDTH'(i);
+      rs_q.free_entries <= '1;
+      if (FPR_ENABLED) begin
+        is_result_available_fpr_q <= '1;
       end
+      is_result_available_gpr_q <= '1;
     end else begin
-      rat_q <= rat_n;
-      rat_state_o <= rat_n;
+      rs_q <= rs_n;
+      is_result_available_gpr_q <= is_result_available_gpr_n;
+      if (FPR_ENABLED) begin
+        is_result_available_fpr_q <= is_result_available_fpr_n;
+      end
     end
   end
 endmodule
