@@ -379,6 +379,172 @@ module issue_stage
     end
   end
 
+  // ---------------------------------------------------------
+  // 2. Manage instructions in reservation stations
+  // ---------------------------------------------------------
+
+  for (int i = 0; i < 8; i++) begin
+    fu_module fu;
+    fu = fu_module'(i); // Le cast magique static    logic [FP_WIDTH-1:0] local_result; // lane-local results
+
+    // Generate instances only if needed, lane 0 always generated
+    if ((lane == 0) || EnableVectors) begin : active_lane
+      logic in_valid, out_valid, out_ready; // lane-local handshake
+
+      logic [NUM_OPERANDS-1:0][FP_WIDTH-1:0] local_operands; // lane-local operands
+      logic [FP_WIDTH-1:0]                   op_result;      // lane-local results
+      fpnew_pkg::status_t                    op_status;
+
+      assign in_valid = in_valid_i & ((lane == 0) | vectorial_op); // upper lanes only for vectors
+      // Slice out the operands for this lane
+      always_comb begin : prepare_input
+        for (int i = 0; i < int'(NUM_OPERANDS); i++) begin
+          local_operands[i] = operands_i[i][(unsigned'(lane)+1)*FP_WIDTH-1:unsigned'(lane)*FP_WIDTH];
+        end
+      end
+
+      // Instantiate the operation from the selected opgroup
+      if (OpGroup == fpnew_pkg::ADDMUL) begin : lane_instance
+        reservation_station #(
+          .CVA6Cfg        (CVA6Cfg),
+          .DATA_WIDTH     (CVA6Cfg.XLEN),
+          .NR_READ_PORTS  (CVA6Cfg.NrRgprPorts),
+          .ADDR_WIDTH     (CVA6Cfg.RegAddrWidth),
+          .NR_RS_ENTRIES  (),
+          .FPR_ENABLED    (is_fpr_used(fu)),
+          .scoreboard_entry_t = (scoreboard_entry_t)
+        ) i_reservation_station (
+          .clk_i   (clk_i),
+          .rst_ni  (rst_ni),
+          .we_i     ,
+          .rm_op_i, // op of the entry to remove
+          .rm_i, // do we remove the entry
+          .rm_id_i, // id of the entry to remove
+          .rm_rd_i, // dest reg of the entry to remove
+          .rs_restore_en_i, // id of the entry to remove
+          .decoded_instr_i,
+          .decoded_instr_ack_i,
+          .decoded_instr_o, //instructions found ready
+          .decoded_instr_valid_o, //is instruction valid
+        );
+        assign lane_is_class[lane]   = 1'b0;
+        assign lane_class_mask[lane] = fpnew_pkg::NEGINF;
+      end else if (OpGroup == fpnew_pkg::DIVSQRT) begin : lane_instance
+        // fpnew_divsqrt #(
+        //   .FpFormat   (FpFormat),
+        //   .NumPipeRegs(NumPipeRegs),
+        //   .PipeConfig (PipeConfig),
+        //   .TagType    (TagType),
+        //   .AuxType    (logic)
+        // ) i_divsqrt (
+        //   .clk_i,
+        //   .rst_ni,
+        //   .operands_i      ( local_operands               ),
+        //   .is_boxed_i      ( is_boxed_i[NUM_OPERANDS-1:0] ),
+        //   .rnd_mode_i,
+        //   .op_i,
+        //   .op_mod_i,
+        //   .tag_i,
+        //   .aux_i           ( vectorial_op         ), // Remember whether operation was vectorial
+        //   .in_valid_i      ( in_valid             ),
+        //   .in_ready_o      ( lane_in_ready[lane]  ),
+        //   .flush_i,
+        //   .result_o        ( op_result            ),
+        //   .status_o        ( op_status            ),
+        //   .extension_bit_o ( lane_ext_bit[lane]   ),
+        //   .tag_o           ( lane_tags[lane]      ),
+        //   .aux_o           ( lane_vectorial[lane] ),
+        //   .out_valid_o     ( out_valid            ),
+        //   .out_ready_i     ( out_ready            ),
+        //   .busy_o          ( lane_busy[lane]      ),
+        //   .reg_ena_i
+        // );
+        // assign lane_is_class[lane] = 1'b0;
+      end else if (OpGroup == fpnew_pkg::NONCOMP) begin : lane_instance
+        fpnew_noncomp #(
+          .FpFormat   (FpFormat),
+          .NumPipeRegs(NumPipeRegs),
+          .PipeConfig (PipeConfig),
+          .TagType    (TagType),
+          .AuxType    (logic)
+        ) i_noncomp (
+          .clk_i,
+          .rst_ni,
+          .operands_i      ( local_operands               ),
+          .is_boxed_i      ( is_boxed_i[NUM_OPERANDS-1:0] ),
+          .rnd_mode_i,
+          .op_i,
+          .op_mod_i,
+          .tag_i,
+          .mask_i            ( simd_mask_i[lane]     ),
+          .aux_i             ( vectorial_op          ), // Remember whether operation was vectorial
+          .in_valid_i        ( in_valid              ),
+          .in_ready_o        ( lane_in_ready[lane]   ),
+          .flush_i,
+          .result_o          ( op_result             ),
+          .status_o          ( op_status             ),
+          .extension_bit_o   ( lane_ext_bit[lane]    ),
+          .class_mask_o      ( lane_class_mask[lane] ),
+          .is_class_o        ( lane_is_class[lane]   ),
+          .tag_o             ( lane_tags[lane]       ),
+          .mask_o            ( lane_masks[lane]      ),
+          .aux_o             ( lane_vectorial[lane]  ),
+          .out_valid_o       ( out_valid             ),
+          .out_ready_i       ( out_ready             ),
+          .busy_o            ( lane_busy[lane]       ),
+          .reg_ena_i,
+          .early_out_valid_o ( lane_early_out_valid[lane] )
+        );
+      end // ADD OTHER OPTIONS HERE
+
+      // Handshakes are only done if the lane is actually used
+      assign out_ready            = out_ready_i & ((lane == 0) | result_is_vector);
+      assign lane_out_valid[lane] = out_valid   & ((lane == 0) | result_is_vector);
+
+      // Properly NaN-box or sign-extend the slice result if not in use
+      assign local_result      = (lane_out_valid[lane] | ExtRegEna) ? op_result : '{default: lane_ext_bit[0]};
+      assign lane_status[lane] = (lane_out_valid[lane] | ExtRegEna) ? op_status : '0;
+
+    // Otherwise generate constant sign-extension
+    end else begin
+      assign lane_out_valid[lane] = 1'b0; // unused lane
+      assign lane_in_ready[lane]  = 1'b0; // unused lane
+      assign local_result         = '{default: lane_ext_bit[0]}; // sign-extend/nan box
+      assign lane_status[lane]    = '0;
+      assign lane_busy[lane]      = 1'b0;
+      assign lane_is_class[lane]  = 1'b0;
+    end
+
+    // Insert lane result into slice result
+    assign slice_result[(unsigned'(lane)+1)*FP_WIDTH-1:unsigned'(lane)*FP_WIDTH] = local_result;
+
+    // Create Classification results
+    if (TrueSIMDClass && SIMD_WIDTH >= 10) begin : vectorial_true_class // true vectorial class blocks are 10bits in size
+      assign slice_vec_class_result[lane*SIMD_WIDTH +: 10] = lane_class_mask[lane];
+      assign slice_vec_class_result[(lane+1)*SIMD_WIDTH-1 -: SIMD_WIDTH-10] = '0;
+    end else if ((lane+1)*8 <= Width) begin : vectorial_class // vectorial class blocks are 8bits in size
+      assign local_sign = (lane_class_mask[lane] == fpnew_pkg::NEGINF ||
+                           lane_class_mask[lane] == fpnew_pkg::NEGNORM ||
+                           lane_class_mask[lane] == fpnew_pkg::NEGSUBNORM ||
+                           lane_class_mask[lane] == fpnew_pkg::NEGZERO);
+      // Write the current block segment
+      assign slice_vec_class_result[(lane+1)*8-1:lane*8] = {
+        local_sign,  // BIT 7
+        ~local_sign, // BIT 6
+        lane_class_mask[lane] == fpnew_pkg::QNAN, // BIT 5
+        lane_class_mask[lane] == fpnew_pkg::SNAN, // BIT 4
+        lane_class_mask[lane] == fpnew_pkg::POSZERO
+            || lane_class_mask[lane] == fpnew_pkg::NEGZERO, // BIT 3
+        lane_class_mask[lane] == fpnew_pkg::POSSUBNORM
+            || lane_class_mask[lane] == fpnew_pkg::NEGSUBNORM, // BIT 2
+        lane_class_mask[lane] == fpnew_pkg::POSNORM
+            || lane_class_mask[lane] == fpnew_pkg::NEGNORM, // BIT 1
+        lane_class_mask[lane] == fpnew_pkg::POSINF
+            || lane_class_mask[lane] == fpnew_pkg::NEGINF // BIT 0
+      };
+    end
+  end
+
 
   // ---------------------------------------------------------
   // 2. Manage instructions in a scoreboard

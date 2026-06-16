@@ -11,20 +11,7 @@
 //
 // Engineer:       Fieux Telmo - fieuxtelmo@gmail.com
 //
-// Additional contributions by:
-//                 Markus Wegmann - markus.wegmann@technokrat.ch
-//                 Noam Gallmann - gnoam@live.com
-//                 Felipe Lisboa Malaquias
-//                 Henry Suzukawa
-//                 Angela Gonzalez - PlanV Technologies
-//
 // Description:    This register file is optimized for implementation on
-//                 FPGAs. The register file features one distributed RAM block per implemented
-//                 sync-write port, each with a parametrized number of async-read ports.
-//                 Read-accesses are multiplexed from the relevant block depending on which block
-//                 was last written to. For that purpose an additional array of registers is
-//                 maintained keeping track of write acesses.
-//
 
 module register_allocation_table
   import ariane_pkg::*;

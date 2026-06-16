@@ -10,15 +10,7 @@
 // specific language governing permissions and limitations under the License.
 //
 // Engineer:       Fieux Telmo - fieuxtelmo@gmail.com
-//
-// Additional contributions by:
-//                 Markus Wegmann - markus.wegmann@technokrat.ch
-//                 Noam Gallmann - gnoam@live.com
-//                 Felipe Lisboa Malaquias
-//                 Henry Suzukawa
-//                 Angela Gonzalez - PlanV Technologies
-//
-// Description:    This register file is optimized for implementation on
+
 
 module tournament_tree #(
     parameter int unsigned           ID_SIZE       = 8,

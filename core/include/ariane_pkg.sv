@@ -511,10 +511,36 @@ package ariane_pkg;
     FCMOV
   } fu_op;
 
+  // list of all functionnal unit
+  typedef enum logic [3:0] {
+    LOAD_STORE, // 0
+    ALU,        // 1
+    ALU2,       // 2
+    CTRL_FLOW,  // 3
+    MULT,       // 4
+    CSR,        // 5
+    FPU,        // 6
+    CVXIF       // 7
+  } fu_module;
+
   function automatic logic op_is_branch(input fu_op op);
     unique case (op) inside
       EQ, NE, LTS, GES, LTU, GEU: return 1'b1;
       default:                    return 1'b0;  // all other ops
+    endcase
+  endfunction
+
+  // does reservation station of one unit needs to keep track of fpr
+  function automatic logic is_fpr_used(input fu_module fu);
+    unique case (fu) inside
+      LOAD_STORE,
+      ALU,
+      ALU2,
+      CTRL_FLOW,
+      MULT,
+      CSR:
+      return 1'b0;
+      default: return 1'b1;  // all other fu
     endcase
   endfunction
 

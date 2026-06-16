@@ -39,6 +39,8 @@ module reservation_station
     input fu_op                                               rm_op_i, // op of the entry to remove
     input logic                                               rm_i, // do we remove the entry
     input logic [CVA6Cfg.GlobalRsIdWidth-1:0]                 rm_id_i, // id of the entry to remove
+    input logic [ADDR_WIDTH-1:0]                              rm_rd_i, // dest reg of the entry to remove
+    input logic                                               rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
@@ -116,51 +118,61 @@ module reservation_station
       is_result_available_fpr_n = is_result_available_fpr_q;
     end
 
-    //adding instr
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
-        rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
-      end
+      if (decoded_instr_ack_i[i]) begin
+        if (we_i[i] && (decoded_instr_i[i].rd != '0)) begin
+          rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
+        end
 
-      //always update dependency
-      if (FPR_ENABLED) begin
-          if (is_rd_fpr(decoded_instr_i[i].op)) begin
-            is_result_available_fpr_n[decoded_instr_i[i].rd] = 1'b0;
+        //always update dependency based on newly issued instr
+        if (FPR_ENABLED) begin
+            if (is_rd_fpr(decoded_instr_i[i].op)) begin
+              is_result_available_fpr_n[decoded_instr_i[i].rd] = 1'b0;
+            end else begin
+              is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
+            end
           end else begin
             is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
           end
-        end else begin
-          is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
         end
       end
     end
 
-
-      // In case of superscalar config, we check RAW hazard.
-      // Current method only work up to 2 issue port
-
-    for
-
-    //removing instr after it was sent to ex stage or because of rollback
+    //removing instr after it was sent to ex stage
+    //or because of rollback triggered by exception or branch miss.
+    //but in both case it is the same mechanism
     rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
-      if (rm_i && rm_id_i == rs_q.rs_table[i].global_rs_id) begin
-        rs_n.free_entries[i] = 1'b1;
+      if (!rs_restore_en_i) begin
+        if (rm_i && rm_id_i == rs_q.rs_table[i].global_rs_id) begin
+          rs_n.free_entries[i] = 1'b1;
+        end
         if (FPR_ENABLED) begin
           if (is_rd_fpr(rm_op_i)) begin
-            is_result_available_fpr_n[rs_q.rs_table[i].rd] = 1'b1;
+            is_result_available_fpr_n[rm_rd_i] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[rm_rd_i] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[rm_rd_i] = 1'b1;
+        end
+      end else begin
+        if (rs_q.rs_table[i].free_entries[i] == 0) begin
+          if (FPR_ENABLED) begin
+            if (is_rd_fpr(rs_q.rs_table[i].op)) begin
+              is_result_available_fpr_n[rs_q.rs_table[i].rd] = 1'b1;
+            end else begin
+              is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
+            end
           end else begin
             is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
           end
-        end else begin
-          is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
         end
       end
 
       //in case of newly added instruction we need to check
       //RAW hazard if 2 instruction are added the same cycle
       //Current method only work for 2 issue ports
-
       if (we_i == '1) begin
         for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
           if (!FPR_ENABLED) begin
@@ -188,20 +200,17 @@ module reservation_station
               rs_n.valid_regs[i][2] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
             end
           end else begin
-            rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_rs1_fpr(decoded_instr_i[j].rs1) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
-            : is_rs1_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
-            rs_n.valid_regs[i][1] = (i == alloc_idx[j]) ? (is_rs2_fpr(decoded_instr_i[j].rs2) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
-            : is_rs2_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
+            : is_rs1_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            rs_n.valid_regs[i][1] = (i == alloc_idx[j]) ? (is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[i].rs2])
+            : is_rs2_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
             if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-              rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_imm_fpr(decoded_instr_i[j].result) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
-              : is_imm_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+              rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_imm_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[i].result])
+              : is_imm_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
             end
           end
         end
       end
-    end
-
-
     end
 
     if (rs_restore_en_i) begin
