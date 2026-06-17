@@ -383,166 +383,158 @@ module issue_stage
   // 2. Manage instructions in reservation stations
   // ---------------------------------------------------------
 
-  for (int i = 0; i < 8; i++) begin
+  localparam int unsigned NR_FU = 9;
+
+  scoreboard_entry_t [NR_FU-1:0] rs_results;
+  logic [NR_FU-1:0] rs_valid;
+
+
+
+  for (int i = 0; i < NR_FU; i++) begin
     fu_module fu;
-    fu = fu_module'(i); // Le cast magique static    logic [FP_WIDTH-1:0] local_result; // lane-local results
+    fu = fu_module'(i);
+
+    logic [CVA6Cfg.NrIssuePorts-1:0]] we_i;
+    logic is_rs_instanciated;
+    logic fu_ready;
+
+
+    for (int j = 0; j< NrIssuePorts; j++ ) begin
+      case (fu)
+        LOAD_STORE :
+          assign we_i[j] = decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE;
+
+        ALU :
+          assign we_i[j] = (decoded_instr_i[0].fu == ALU && decoded_instr_i[1].fu == ALU) ?
+            ((j == 0) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == ALU;
+
+        // since we only output 1 instruction per rs and we have 2 ALU the rs linked to the
+        // seconde ALU is only wrote when we pull 2 ALU instr at the same time
+        ALU2 :
+          assign we_i[j] = (decoded_instr_i[0].fu == ALU && decoded_instr_i[1].fu == ALU) ?
+            ((j == 1) ? 1'b1 : 1'b0) : 1'b0;
+        FPU :
+          assign we_i[j] = decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC;
+
+      default : begin
+        assign we_i[j] = decoded_instr_i[j].fu == fu;
+      end
+    endcase
+
+    case (fu)
+      ALU2 :
+        assign is_rs_instanciated = CVA6Cfg.SuperscalarEn;
+
+      FPU :
+        assign is_rs_instanciated = CVA6Cfg.FpPresent;
+
+      CVXIF :
+        assign is_rs_instanciated = CVA6Cfg.CvxifEn;
+
+      ACCEL :
+        assign is_rs_instanciated = EnableAccelerator;
+
+      default : begin
+        assign is_rs_instanciated = 1'b1;
+    end
+
+    case (fu)
+      ALU :
+        assign fu_ready = flu_ready_i;
+
+      ALU2 :
+        assign fu_ready = fpu_ready_i;
+
+      LOAD_STORE :
+        assign fu_ready = lsu_ready_i;
+
+      FPU :
+        assign fu_ready = fpu_ready_i;
+
+      CVXIF :
+        assign fu_ready = xfu_ready_i;
+
+
+      default : begin
+        assign fu_ready = 1'b1;
+    end
+
 
     // Generate instances only if needed, lane 0 always generated
-    if ((lane == 0) || EnableVectors) begin : active_lane
-      logic in_valid, out_valid, out_ready; // lane-local handshake
-
-      logic [NUM_OPERANDS-1:0][FP_WIDTH-1:0] local_operands; // lane-local operands
-      logic [FP_WIDTH-1:0]                   op_result;      // lane-local results
-      fpnew_pkg::status_t                    op_status;
-
-      assign in_valid = in_valid_i & ((lane == 0) | vectorial_op); // upper lanes only for vectors
-      // Slice out the operands for this lane
-      always_comb begin : prepare_input
-        for (int i = 0; i < int'(NUM_OPERANDS); i++) begin
-          local_operands[i] = operands_i[i][(unsigned'(lane)+1)*FP_WIDTH-1:unsigned'(lane)*FP_WIDTH];
-        end
-      end
-
-      // Instantiate the operation from the selected opgroup
-      if (OpGroup == fpnew_pkg::ADDMUL) begin : lane_instance
-        reservation_station #(
-          .CVA6Cfg        (CVA6Cfg),
-          .DATA_WIDTH     (CVA6Cfg.XLEN),
-          .NR_READ_PORTS  (CVA6Cfg.NrRgprPorts),
-          .ADDR_WIDTH     (CVA6Cfg.RegAddrWidth),
-          .NR_RS_ENTRIES  (),
-          .FPR_ENABLED    (is_fpr_used(fu)),
-          .scoreboard_entry_t = (scoreboard_entry_t)
-        ) i_reservation_station (
-          .clk_i   (clk_i),
-          .rst_ni  (rst_ni),
-          .we_i     ,
-          .rm_op_i, // op of the entry to remove
-          .rm_i, // do we remove the entry
-          .rm_id_i, // id of the entry to remove
-          .rm_rd_i, // dest reg of the entry to remove
-          .rs_restore_en_i, // id of the entry to remove
-          .decoded_instr_i,
-          .decoded_instr_ack_i,
-          .decoded_instr_o, //instructions found ready
-          .decoded_instr_valid_o, //is instruction valid
-        );
-        assign lane_is_class[lane]   = 1'b0;
-        assign lane_class_mask[lane] = fpnew_pkg::NEGINF;
-      end else if (OpGroup == fpnew_pkg::DIVSQRT) begin : lane_instance
-        // fpnew_divsqrt #(
-        //   .FpFormat   (FpFormat),
-        //   .NumPipeRegs(NumPipeRegs),
-        //   .PipeConfig (PipeConfig),
-        //   .TagType    (TagType),
-        //   .AuxType    (logic)
-        // ) i_divsqrt (
-        //   .clk_i,
-        //   .rst_ni,
-        //   .operands_i      ( local_operands               ),
-        //   .is_boxed_i      ( is_boxed_i[NUM_OPERANDS-1:0] ),
-        //   .rnd_mode_i,
-        //   .op_i,
-        //   .op_mod_i,
-        //   .tag_i,
-        //   .aux_i           ( vectorial_op         ), // Remember whether operation was vectorial
-        //   .in_valid_i      ( in_valid             ),
-        //   .in_ready_o      ( lane_in_ready[lane]  ),
-        //   .flush_i,
-        //   .result_o        ( op_result            ),
-        //   .status_o        ( op_status            ),
-        //   .extension_bit_o ( lane_ext_bit[lane]   ),
-        //   .tag_o           ( lane_tags[lane]      ),
-        //   .aux_o           ( lane_vectorial[lane] ),
-        //   .out_valid_o     ( out_valid            ),
-        //   .out_ready_i     ( out_ready            ),
-        //   .busy_o          ( lane_busy[lane]      ),
-        //   .reg_ena_i
-        // );
-        // assign lane_is_class[lane] = 1'b0;
-      end else if (OpGroup == fpnew_pkg::NONCOMP) begin : lane_instance
-        fpnew_noncomp #(
-          .FpFormat   (FpFormat),
-          .NumPipeRegs(NumPipeRegs),
-          .PipeConfig (PipeConfig),
-          .TagType    (TagType),
-          .AuxType    (logic)
-        ) i_noncomp (
-          .clk_i,
-          .rst_ni,
-          .operands_i      ( local_operands               ),
-          .is_boxed_i      ( is_boxed_i[NUM_OPERANDS-1:0] ),
-          .rnd_mode_i,
-          .op_i,
-          .op_mod_i,
-          .tag_i,
-          .mask_i            ( simd_mask_i[lane]     ),
-          .aux_i             ( vectorial_op          ), // Remember whether operation was vectorial
-          .in_valid_i        ( in_valid              ),
-          .in_ready_o        ( lane_in_ready[lane]   ),
-          .flush_i,
-          .result_o          ( op_result             ),
-          .status_o          ( op_status             ),
-          .extension_bit_o   ( lane_ext_bit[lane]    ),
-          .class_mask_o      ( lane_class_mask[lane] ),
-          .is_class_o        ( lane_is_class[lane]   ),
-          .tag_o             ( lane_tags[lane]       ),
-          .mask_o            ( lane_masks[lane]      ),
-          .aux_o             ( lane_vectorial[lane]  ),
-          .out_valid_o       ( out_valid             ),
-          .out_ready_i       ( out_ready             ),
-          .busy_o            ( lane_busy[lane]       ),
-          .reg_ena_i,
-          .early_out_valid_o ( lane_early_out_valid[lane] )
-        );
-      end // ADD OTHER OPTIONS HERE
-
-      // Handshakes are only done if the lane is actually used
-      assign out_ready            = out_ready_i & ((lane == 0) | result_is_vector);
-      assign lane_out_valid[lane] = out_valid   & ((lane == 0) | result_is_vector);
-
-      // Properly NaN-box or sign-extend the slice result if not in use
-      assign local_result      = (lane_out_valid[lane] | ExtRegEna) ? op_result : '{default: lane_ext_bit[0]};
-      assign lane_status[lane] = (lane_out_valid[lane] | ExtRegEna) ? op_status : '0;
-
-    // Otherwise generate constant sign-extension
+    if (is_rs_instanciated) begin : rs_instance
+      reservation_station #(
+        .CVA6Cfg        (CVA6Cfg),
+        .DATA_WIDTH     (CVA6Cfg.XLEN),
+        .NR_READ_PORTS  (CVA6Cfg.NrRgprPorts),
+        .ADDR_WIDTH     (CVA6Cfg.RegAddrWidth),
+        .NR_RS_ENTRIES  (),
+        .FPR_ENABLED    (is_fpr_used(fu)),
+        .scoreboard_entry_t = (scoreboard_entry_t)
+      ) i_reservation_station (
+        .clk_i   (clk_i),
+        .rst_ni  (rst_ni),
+        .we_i     ,
+        .rm_op_i, // op of the entry to remove
+        .rm_i, // do we remove the entry
+        .rm_id_i, // id of the entry to remove
+        .rm_rd_i, // dest reg of the entry to remove
+        .rs_restore_en_i, // id of the entry to remove
+        .decoded_instr_i,
+        .decoded_instr_ack_i,
+        .decoded_instr_o, //instructions found ready
+        .decoded_instr_valid_o, //is instruction valid
+      );
+      assign rs_results[i] = decoded_instr_o;
+      assign rs_valid[i] = decoded_instr_valid_o && fu_ready;
     end else begin
-      assign lane_out_valid[lane] = 1'b0; // unused lane
-      assign lane_in_ready[lane]  = 1'b0; // unused lane
-      assign local_result         = '{default: lane_ext_bit[0]}; // sign-extend/nan box
-      assign lane_status[lane]    = '0;
-      assign lane_busy[lane]      = 1'b0;
-      assign lane_is_class[lane]  = 1'b0;
+      assign rs_results[i] = '0;
+      assign rs_valid[i] = '0;
+    end
+  end
+
+
+  logic [NR_FU:0] tournament_valid_masked [CVA6Cfg.NrIssuePorts:0];
+  logic [CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num [CVA6Cfg.NrIssuePorts-1:0];
+  logic [NR_FU-1:0][$clog2(NR_FU)-1:0] tournament_id;
+
+  assign tournament_valid_masked [0] = rs_valid;
+
+  for (genvar i = 0 ; i < NR_FU ; i++) begin
+    assign tournament_seq_num[i] = rs_results[i].global_rs_id;
+    assign tournament_id[i] = i;
+  end
+
+  //cascade of tournament_tree in order to extract 2 instructions to issue
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
+    tournament_tree #(
+        .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
+        .NR_PLAYER(NR_FU)
+    i_tournament_tree (
+        .valid_i    (tournament_valid_masked),
+        .seq_num_i  (tournament_seq_num),
+        .id_i       (tournament_id),
+        .winner_o,
+        .winner_valid_o (issue_instr_valid_sb_iro[i])
+    );
+
+    assign issue_instr_sb_iro[i] = rs_results[winner_o];
+
+    // Only ALU is multiplied. All other fu can take only one instr per cycle
+    for (genvar i = 0 ; i < NR_FU ; i++) begin
+      if (winner_valid_o == 1'b1 && rs_results[winner_o].fu != ALU) begin
+        assign tournament_valid_masked[i+1] = rs_results[i].fu == rs_results[winner_o].fu ? 1'b0 : tournament_valid_masked[i];
+      end else bebegin
+        assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_FU'(1) << winner_o);
+      end
+      assign tournament_id[i] = i;
     end
 
-    // Insert lane result into slice result
-    assign slice_result[(unsigned'(lane)+1)*FP_WIDTH-1:unsigned'(lane)*FP_WIDTH] = local_result;
+    //Finally we reorder instruction for 2 reasons
+    //1. issue port 2 cannot execute CSR, CVXIF op
+    //2. We cannot issue to ALU2 and FPU
 
-    // Create Classification results
-    if (TrueSIMDClass && SIMD_WIDTH >= 10) begin : vectorial_true_class // true vectorial class blocks are 10bits in size
-      assign slice_vec_class_result[lane*SIMD_WIDTH +: 10] = lane_class_mask[lane];
-      assign slice_vec_class_result[(lane+1)*SIMD_WIDTH-1 -: SIMD_WIDTH-10] = '0;
-    end else if ((lane+1)*8 <= Width) begin : vectorial_class // vectorial class blocks are 8bits in size
-      assign local_sign = (lane_class_mask[lane] == fpnew_pkg::NEGINF ||
-                           lane_class_mask[lane] == fpnew_pkg::NEGNORM ||
-                           lane_class_mask[lane] == fpnew_pkg::NEGSUBNORM ||
-                           lane_class_mask[lane] == fpnew_pkg::NEGZERO);
-      // Write the current block segment
-      assign slice_vec_class_result[(lane+1)*8-1:lane*8] = {
-        local_sign,  // BIT 7
-        ~local_sign, // BIT 6
-        lane_class_mask[lane] == fpnew_pkg::QNAN, // BIT 5
-        lane_class_mask[lane] == fpnew_pkg::SNAN, // BIT 4
-        lane_class_mask[lane] == fpnew_pkg::POSZERO
-            || lane_class_mask[lane] == fpnew_pkg::NEGZERO, // BIT 3
-        lane_class_mask[lane] == fpnew_pkg::POSSUBNORM
-            || lane_class_mask[lane] == fpnew_pkg::NEGSUBNORM, // BIT 2
-        lane_class_mask[lane] == fpnew_pkg::POSNORM
-            || lane_class_mask[lane] == fpnew_pkg::NEGNORM, // BIT 1
-        lane_class_mask[lane] == fpnew_pkg::POSINF
-            || lane_class_mask[lane] == fpnew_pkg::NEGINF // BIT 0
-      };
-    end
+
+
   end
 
 
@@ -573,9 +565,9 @@ module issue_stage
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
       .decoded_instr_ack_o     (decoded_instr_ack),
-      .issue_instr_o           (issue_instr_sb_iro),
+      .issue_instr_o           (//j'ai enlevé cette valeur qui est drivé par les rs),
       .orig_instr_o            (orig_instr_sb_iro),
-      .issue_instr_valid_o     (issue_instr_valid_sb_iro),
+      .issue_instr_valid_o     (//aussi drivé par les rs),
       .issue_ack_i             (issue_ack_iro_sb),
       .fwd_o                   (fwd),
       .resolved_branch_i       (resolved_branch_i),

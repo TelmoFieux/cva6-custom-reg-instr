@@ -520,7 +520,8 @@ package ariane_pkg;
     MULT,       // 4
     CSR,        // 5
     FPU,        // 6
-    CVXIF       // 7
+    CVXIF,      // 7
+    ACCEL       // 8
   } fu_module;
 
   function automatic logic op_is_branch(input fu_op op);
