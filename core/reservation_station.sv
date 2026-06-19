@@ -33,14 +33,15 @@ module reservation_station
     parameter int unsigned           FPR_ENABLED   = 0,
     parameter type scoreboard_entry_t = logic
 ) (
-    input logic                                               clk_i,
-    input logic                                               rst_ni,
-    input logic [CVA6Cfg.NrIssuePorts-1:0]                    we_i,
-    input fu_op                                               rm_op_i, // op of the entry to remove
-    input logic                                               rm_i, // do we remove the entry
-    input logic [CVA6Cfg.GlobalRsIdWidth-1:0]                 rm_id_i, // id of the entry to remove
-    input logic [ADDR_WIDTH-1:0]                              rm_rd_i, // dest reg of the entry to remove
-    input logic                                               rs_restore_en_i, // id of the entry to remove
+    input logic                                                         clk_i,
+    input logic                                                         rst_ni,
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                              we_i,
+    input fu_op [CVA6Cfg.NrWbPorts-1:0]                                 rm_op_i, // op of the entry to remove
+    input logic [CVA6Cfg.NrWbPorts-1:0]                                 rm_i, // do we remove the entry
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    rm_id_i, // id of the entry to remove
+    input logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 rm_rd_i, // dest reg of the entry to remove
+    input logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 rm_valid_i, // dest reg of the entry to remove
+    input logic                                                         rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
@@ -138,23 +139,35 @@ module reservation_station
       end
     end
 
-    //removing instr after it was sent to ex stage
+    logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] RAW_updated_regs;
+    logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] updated_regs;
+    logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] forwarding_updated_regs;
+
+    RAW_updated_regs = rs_q.rs_table;
+    updated_regs = rs_q.rs_table;
+    forwarding_updated_regs = '0;
+
+    //removing instr after it finished executing
     //or because of rollback triggered by exception or branch miss.
-    //but in both case it is the same mechanism
+    //but in both case it is the same mechanism so we use the same signal
     rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
       if (!rs_restore_en_i) begin
-        if (rm_i && rm_id_i == rs_q.rs_table[i].global_rs_id) begin
-          rs_n.free_entries[i] = 1'b1;
-        end
-        if (FPR_ENABLED) begin
-          if (is_rd_fpr(rm_op_i)) begin
-            is_result_available_fpr_n[rm_rd_i] = 1'b1;
-          end else begin
-            is_result_available_gpr_n[rm_rd_i] = 1'b1;
+        for (int j = 0; j < CVA6Cfg.NrWbPorts; j++) begin
+          if(rm_valid_i[j]) begin
+            if (rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id) begin
+              rs_n.free_entries[i] = 1'b1;
+            end
+            if (FPR_ENABLED) begin
+              if (is_rd_fpr(rm_op_i[j])) begin
+                is_result_available_fpr_n[rm_rd_i[j]] = 1'b1;
+              end else begin
+                is_result_available_gpr_n[rm_rd_i[j]] = 1'b1;
+              end
+            end else begin
+              is_result_available_gpr_n[rm_rd_i[j]] = 1'b1;
+            end
           end
-        end else begin
-          is_result_available_gpr_n[rm_rd_i] = 1'b1;
         end
       end else begin
         if (rs_q.rs_table[i].free_entries[i] == 0) begin
@@ -170,48 +183,124 @@ module reservation_station
         end
       end
 
-      //in case of newly added instruction we need to check
-      //RAW hazard if 2 instruction are added the same cycle
-      //Current method only work for 2 issue ports
-      if (we_i == '1) begin
-        for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
-          if (!FPR_ENABLED) begin
-            rs_n.valid_regs[i][0] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rs1 == decoded_instr_i[j-1].rd) ? 1'b0) : is_result_available_gpr_q[decoded_instr_i[j].rs1];
-            rs_n.valid_regs[i][1] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rs2 == decoded_instr_i[j-1].rd) ? 1'b0) : is_result_available_gpr_q[decoded_instr_i[j].rs2];
-            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-              rs_n.valid_regs[i][0] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].result == decoded_instr_i[j-1].rd) ? 1'b0) : is_result_available_gpr_q[decoded_instr_i[j].result];
-            end
-          end else begin
-            rs_n.valid_regs[i][0] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rd == decoded_instr_i[j-1].rd && is_rs1_fpr(decoded_instr_i[j].op) && is_rd_fpr(decoded_instr_i[j-1])) ? 1'b0)
-            : is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[i].rs1];
-            rs_n.valid_regs[i][1] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].rs2 == decoded_instr_i[j-1].rd && is_rs2_fpr(decoded_instr_i[j].op) && is_rd_fpr(decoded_instr_i[j-1])) ? 1'b0)
-            : is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[i].rs2];
-            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-              rs_n.valid_regs[i][2] = (i == alloc_idx[j] && j > 0) ? ((decoded_instr_i[j].result == decoded_instr_i[j-1].rd && is_imm_fpr(decoded_instr_i[j].op) && is_rd_fpr(decoded_instr_i[j-1])) ? 1'b0)
-              : is_imm_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[i].result];
+      //Here we update the validity of operands for each instr
+      for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
+
+        //First we check RAW hazard between the 2 newly fetched instr
+        if (!FPR_ENABLED) begin
+          RAW_updated_regs[i][0] = j > 0 && (decoded_instr_i[j].rs1 == decoded_instr_i[j-1].rd) ? 1'b0 : 1'b1;
+          RAW_updated_regs[i][1] = j > 0 && (decoded_instr_i[j].rs2 == decoded_instr_i[j-1].rd) ? 1'b0 : 1'b1;
+          if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+            RAW_updated_regs[i][2] = j > 0 && (decoded_instr_i[j].result == decoded_instr_i[j-1].rd) ? 1'b0 : 1'b1;
+        end else begin
+          RAW_updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[j-1].op) && is_rs1_fpr(decoded_instr_i[j].op) && j > 0 && decoded_instr_i[j].rs1 == decoded_instr_i[j-1].rd ? 1'b0 : 1'b1;
+          RAW_updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[j-1].op) && is_rs2_fpr(decoded_instr_i[j].op) && j > 0 && decoded_instr_i[j].rs2 == decoded_instr_i[j-1].rd ? 1'b0 : 1'b1;
+          if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
+            RAW_updated_regs[i][2] = is_imm_fpr(decoded_instr_i[j-1].op) && is_imm_fpr(decoded_instr_i[j].op) && j > 0 && decoded_instr_i[j].result == decoded_instr_i[j-1].rd ? 1'b0 : 1'b1;
           end
         end
-      end else if (we_i != '0) begin
-        for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
-          if (!FPR_ENABLED) begin
-            rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
-            rs_n.valid_regs[i][1] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
-            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-              rs_n.valid_regs[i][2] = (i == alloc_idx[j]) ? is_result_available_gpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
-            end
-          end else begin
-            rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[i].rs1])
-            : is_rs1_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
-            rs_n.valid_regs[i][1] = (i == alloc_idx[j]) ? (is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[i].rs2])
-            : is_rs2_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
-            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-              rs_n.valid_regs[i][0] = (i == alloc_idx[j]) ? (is_imm_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[i].result])
-              : is_imm_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+
+        //Then we update based on the retired instr that finished executing
+        //because otherwise dependencies would take 1 cycle to update
+        for (int k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
+          if (rm_valid_i[k]) begin
+            if (!FPR_ENABLED) begin
+              if (i == alloc_idx[j]) begin
+                if (rm_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                if (rm_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                  if (rm_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
+                end
+              end else begin
+                if (rm_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                if (rm_rd_i[k] == rs_q.rs_table[i].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm) begin
+                  if (rm_rd_i[k] == rs_q.rs_table[i].result) forwarding_updated_regs[i][2] = 1'b1;
+                end
+              end
+            end else begin
+              if (i == alloc_idx[j]) begin
+                if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[j].op)) begin
+                  if (rm_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                end
+                if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[j].op)) begin
+                  if (rm_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                end
+                if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                  if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[j].op)) begin
+                    if (rm_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
+                  end
+                end
+              end else begin
+              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(rs_q.rs_table[i].op)) begin
+                if (rm_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
+              end
+              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(rs_q.rs_table[i].op)) begin
+                if (rm_rd_i[k] == rs_q.rs_table[i].rs2) forwarding_updated_regs[i][1] = 1'b1;
+              end
+              if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm) begin
+                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(rs_q.rs_table[i].op)) begin
+                  if (rm_rd_i[k] == rs_q.rs_table[i].result) forwarding_updated_regs[i][2] = 1'b1;
+                end
+              end
             end
           end
         end
       end
+
+        //Finally we define the default behavior
+        if (!FPR_ENABLED) begin
+          if (i == alloc_idx[j]) begin
+            updated_regs[i][0] = is_result_available_gpr_q[decoded_instr_i[j].rs1];
+            updated_regs[i][1] = is_result_available_gpr_q[decoded_instr_i[j].rs2];
+            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
+              updated_regs[i][2] = is_result_available_gpr_q[decoded_instr_i[j].result];
+          end else begin
+            forwarding_updated_regs[i][0] = is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            forwarding_updated_regs[i][1] = is_result_available_gpr_q[rs_q.rs_table[i].rs2];
+            if (NR_READ_PORTS == 3 && !rs_q.rs_table[j].use_imm)
+              forwarding_updated_regs[i][2] = is_result_available_gpr_q[rs_q.rs_table[i].result];
+          end
+        end else begin
+          if (i == alloc_idx[j]) begin
+            updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[j].rs1) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[j].rs1];
+            updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[j].rs2) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[j].rs2];
+            if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
+              updated_regs[i][2] = is_imm_fpr(decoded_instr_i[j].result) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[j].result];
+          end else begin
+            updated_regs[i][0] = is_rs1_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            updated_regs[i][1] = is_rs2_fpr(rs_q.rs_table[i].rs2) ? is_result_available_fpr_q[rs_q.rs_table[i].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
+            if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm)
+              updated_regs[i][2] = is_imm_fpr(rs_q.rs_table[i].result) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+          end
+        end
+
+      end
+
+
+      //In the end we select the right calculated value for valid_regs
+      //First we check select RAW result if valid then forwarding result and finally default result
+      for (int j = 0; j < CVA6Cfg.NrIssuePorts; i++) begin
+        if (decoded_instr_ack_i[j] == 1'b1 && !rs_restore_en_i) begin
+          if (i == alloc_idx[1] && we_i[1]) begin
+            rs_n.valid_regs[i][0] = RAW_updated_regs[i][0] == 1'b1 ? (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0]) : RAW_updated_regs[i][0];
+            rs_n.valid_regs[i][1] = RAW_updated_regs[i][1] == 1'b1 ? (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1]) : RAW_updated_regs[i][1];
+            rs_n.valid_regs[i][2] = RAW_updated_regs[i][2] == 1'b1 ? (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2]) : RAW_updated_regs[i][2];
+          end else begin
+            rs_n.valid_regs[i][0] = forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0]);
+            rs_n.valid_regs[i][1] = forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1]);
+            rs_n.valid_regs[i][2] = forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2]);
+          end
+        end else begin
+          rs_n.valid_regs[i][0] = updated_regs[i][0];
+          rs_n.valid_regs[i][1] = updated_regs[i][1];
+          rs_n.valid_regs[i][2] = updated_regs[i][2];
+        end
+      end
+
+
     end
+
 
     if (rs_restore_en_i) begin
       rs_n.free_entries = '1;

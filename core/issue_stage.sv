@@ -388,6 +388,8 @@ module issue_stage
   scoreboard_entry_t [NR_FU-1:0] rs_results;
   logic [NR_FU-1:0] rs_valid;
 
+  scoreboard_entry_t [NR_FU-1:0] tree_results;
+  logic [NR_FU-1:0] tree_valid;
 
 
   for (int i = 0; i < NR_FU; i++) begin
@@ -514,29 +516,24 @@ module issue_stage
         .seq_num_i  (tournament_seq_num),
         .id_i       (tournament_id),
         .winner_o,
-        .winner_valid_o (issue_instr_valid_sb_iro[i])
+        .winner_valid_o (tree_valid)
     );
 
-    assign issue_instr_sb_iro[i] = rs_results[winner_o];
+    assign tree_results[i] = rs_results[winner_o]
 
-    // Only ALU is multiplied. All other fu can take only one instr per cycle
-    for (genvar i = 0 ; i < NR_FU ; i++) begin
-      if (winner_valid_o == 1'b1 && rs_results[winner_o].fu != ALU) begin
-        assign tournament_valid_masked[i+1] = rs_results[i].fu == rs_results[winner_o].fu ? 1'b0 : tournament_valid_masked[i];
-      end else bebegin
-        assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_FU'(1) << winner_o);
-      end
-      assign tournament_id[i] = i;
-    end
-
-    //Finally we reorder instruction for 2 reasons
-    //1. issue port 2 cannot execute CSR, CVXIF op
-    //2. We cannot issue to ALU2 and FPU
-
-
+    assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_FU'(1) << winner_o);
 
   end
 
+  //Finally we reorder instruction for 2 reasons
+  //1. issue port 2 cannot execute CSR or CVXIF operations
+  //2. We cannot issue to ALU2 and FPU at the same time
+  if (tree_results[1].fu == CSR || tree_results[1].fu == CVXIF || tree_results[1].fu == ALU) begin
+    assign issue_instr_sb_iro[0] = tree_results[1];
+    assign issue_instr_sb_iro[1] = tree_results[0];
+    assign issue_instr_valid_sb_iro[0] = tree_valid[1];
+    assign issue_instr_valid_sb_iro[1] = tree_valid[0];
+  end
 
   // ---------------------------------------------------------
   // 2. Manage instructions in a scoreboard
