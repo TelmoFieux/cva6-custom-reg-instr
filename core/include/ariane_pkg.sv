@@ -511,18 +511,17 @@ package ariane_pkg;
     FCMOV
   } fu_op;
 
-  // list of all functionnal unit
+  // list of all RS needed
+  // Basically 1 per physical unit
+  // except for fpu and ALU2 wich share the
+  // same Wb port
   typedef enum logic [3:0] {
-    LOAD_STORE, // 0
-    ALU,        // 1
-    ALU2,       // 2
-    CTRL_FLOW,  // 3
-    MULT,       // 4
-    CSR,        // 5
-    FPU,        // 6
-    CVXIF,      // 7
-    ACCEL       // 8
-  } fu_module;
+    FLU,
+    LOAD_STORE,
+    FPU_ALU2,
+    ACCEL, // not allowed yet on superscalar
+    CVXIF
+  } fu_phys;
 
   function automatic logic op_is_branch(input fu_op op);
     unique case (op) inside
@@ -534,12 +533,8 @@ package ariane_pkg;
   // does reservation station of one unit needs to keep track of fpr
   function automatic logic is_fpr_used(input fu_module fu);
     unique case (fu) inside
-      LOAD_STORE,
-      ALU,
-      ALU2,
-      CTRL_FLOW,
-      MULT,
-      CSR:
+      FLU,
+      LOAD_STORE:
       return 1'b0;
       default: return 1'b1;  // all other fu
     endcase

@@ -36,11 +36,12 @@ module reservation_station
     input logic                                                         clk_i,
     input logic                                                         rst_ni,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                              we_i,
-    input fu_op [CVA6Cfg.NrWbPorts-1:0]                                 rm_op_i, // op of the entry to remove
-    input logic [CVA6Cfg.NrWbPorts-1:0]                                 rm_i, // do we remove the entry
-    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    rm_id_i, // id of the entry to remove
-    input logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 rm_rd_i, // dest reg of the entry to remove
-    input logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 rm_valid_i, // dest reg of the entry to remove
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                              rm_i, // do we remove the entry
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i, // id of the entry to remove
+    input logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 wb_rd_i, // dest reg of the entry to remove
+    input fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
+    input logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           rollback_id_i, // id of the entry to rollback
+    input logic                                                         rollback_en_i, // is rollback enabled
     input logic                                                         rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
@@ -153,20 +154,20 @@ module reservation_station
     rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
       if (!rs_restore_en_i) begin
-        for (int j = 0; j < CVA6Cfg.NrWbPorts; j++) begin
-          if(rm_valid_i[j]) begin
-            if (rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id) begin
-              rs_n.free_entries[i] = 1'b1;
-            end
-            if (FPR_ENABLED) begin
-              if (is_rd_fpr(rm_op_i[j])) begin
-                is_result_available_fpr_n[rm_rd_i[j]] = 1'b1;
-              end else begin
-                is_result_available_gpr_n[rm_rd_i[j]] = 1'b1;
-              end
+        for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+          if (rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id
+            || rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id) begin
+            rs_n.free_entries[i] = 1'b1;
+          end
+          if (FPR_ENABLED) begin
+            if (is_rd_fpr(wb_op_i[j])) begin
+              is_result_available_fpr_n[wb_rd_i[j]] = 1'b1;
             end else begin
-              is_result_available_gpr_n[rm_rd_i[j]] = 1'b1;
+              is_result_available_gpr_n[wb_rd_i[j]] = 1'b1;
             end
+          end else begin
+            is_result_available_gpr_n[wb_rd_i[j]] = 1'b1;
+          end
           end
         end
       end else begin
@@ -206,41 +207,41 @@ module reservation_station
           if (rm_valid_i[k]) begin
             if (!FPR_ENABLED) begin
               if (i == alloc_idx[j]) begin
-                if (rm_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
-                if (rm_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                if (wb_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                if (wb_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
                 if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-                  if (rm_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
+                  if (wb_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
                 end
               end else begin
-                if (rm_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
-                if (rm_rd_i[k] == rs_q.rs_table[i].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                if (wb_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                if (wb_rd_i[k] == rs_q.rs_table[i].rs2) forwarding_updated_regs[i][1] = 1'b1;
                 if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm) begin
-                  if (rm_rd_i[k] == rs_q.rs_table[i].result) forwarding_updated_regs[i][2] = 1'b1;
+                  if (wb_rd_i[k] == rs_q.rs_table[i].result) forwarding_updated_regs[i][2] = 1'b1;
                 end
               end
             end else begin
               if (i == alloc_idx[j]) begin
-                if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[j].op)) begin
-                  if (rm_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                if (is_rd_fpr(wb_op_i[k]) == is_rs1_fpr(decoded_instr_i[j].op)) begin
+                  if (wb_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
                 end
-                if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[j].op)) begin
-                  if (rm_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                if (is_rd_fpr(wb_op_i[k]) == is_rs2_fpr(decoded_instr_i[j].op)) begin
+                  if (wb_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
                 end
                 if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
-                  if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[j].op)) begin
-                    if (rm_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
+                  if (is_rd_fpr(wb_op_i[k]) == is_imm_fpr(decoded_instr_i[j].op)) begin
+                    if (wb_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
                   end
                 end
               end else begin
-              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(rs_q.rs_table[i].op)) begin
-                if (rm_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
+              if (is_rd_fpr(wb_op_i[k]) == is_rs1_fpr(rs_q.rs_table[i].op)) begin
+                if (wb_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
               end
-              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(rs_q.rs_table[i].op)) begin
-                if (rm_rd_i[k] == rs_q.rs_table[i].rs2) forwarding_updated_regs[i][1] = 1'b1;
+              if (is_rd_fpr(wb_op_i[k]) == is_rs2_fpr(rs_q.rs_table[i].op)) begin
+                if (wb_rd_i[k] == rs_q.rs_table[i].rs2) forwarding_updated_regs[i][1] = 1'b1;
               end
               if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm) begin
-                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(rs_q.rs_table[i].op)) begin
-                  if (rm_rd_i[k] == rs_q.rs_table[i].result) forwarding_updated_regs[i][2] = 1'b1;
+                if (is_rd_fpr(wb_op_i[k]) == is_imm_fpr(rs_q.rs_table[i].op)) begin
+                  if (wb_rd_i[k] == rs_q.rs_table[i].result) forwarding_updated_regs[i][2] = 1'b1;
                 end
               end
             end

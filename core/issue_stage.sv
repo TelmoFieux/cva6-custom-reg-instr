@@ -383,7 +383,12 @@ module issue_stage
   // 2. Manage instructions in reservation stations
   // ---------------------------------------------------------
 
-  localparam int unsigned NR_FU = 9;
+  localparam int unsigned NR_FU = 5;
+  logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id_n, global_rs_id_q;
+
+  for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+    renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
+  end
 
   scoreboard_entry_t [NR_FU-1:0] rs_results;
   logic [NR_FU-1:0] rs_valid;
@@ -391,100 +396,113 @@ module issue_stage
   scoreboard_entry_t [NR_FU-1:0] tree_results;
   logic [NR_FU-1:0] tree_valid;
 
-
   for (int i = 0; i < NR_FU; i++) begin
-    fu_module fu;
-    fu = fu_module'(i);
+    fu_phys fu;
+    fu = fu_phys'(i);
 
-    logic [CVA6Cfg.NrIssuePorts-1:0]] we_i;
     logic is_rs_instanciated;
-    logic fu_ready;
-
-
-    for (int j = 0; j< NrIssuePorts; j++ ) begin
-      case (fu)
-        LOAD_STORE :
-          assign we_i[j] = decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE;
-
-        ALU :
-          assign we_i[j] = (decoded_instr_i[0].fu == ALU && decoded_instr_i[1].fu == ALU) ?
-            ((j == 0) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == ALU;
-
-        // since we only output 1 instruction per rs and we have 2 ALU the rs linked to the
-        // seconde ALU is only wrote when we pull 2 ALU instr at the same time
-        ALU2 :
-          assign we_i[j] = (decoded_instr_i[0].fu == ALU && decoded_instr_i[1].fu == ALU) ?
-            ((j == 1) ? 1'b1 : 1'b0) : 1'b0;
-        FPU :
-          assign we_i[j] = decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC;
-
-      default : begin
-        assign we_i[j] = decoded_instr_i[j].fu == fu;
-      end
-    endcase
 
     case (fu)
-      ALU2 :
-        assign is_rs_instanciated = CVA6Cfg.SuperscalarEn;
-
-      FPU :
-        assign is_rs_instanciated = CVA6Cfg.FpPresent;
+      FPU_ALU2 :
+        assign is_rs_instanciated = CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent;
 
       CVXIF :
         assign is_rs_instanciated = CVA6Cfg.CvxifEn;
 
       ACCEL :
-        assign is_rs_instanciated = EnableAccelerator;
+        assign is_rs_instanciated = '0; // not supported in superscalar mode
 
       default : begin
         assign is_rs_instanciated = 1'b1;
-    end
+    endcase
 
-    case (fu)
-      ALU :
-        assign fu_ready = flu_ready_i;
-
-      ALU2 :
-        assign fu_ready = fpu_ready_i;
-
-      LOAD_STORE :
-        assign fu_ready = lsu_ready_i;
-
-      FPU :
-        assign fu_ready = fpu_ready_i;
-
-      CVXIF :
-        assign fu_ready = xfu_ready_i;
-
-
-      default : begin
-        assign fu_ready = 1'b1;
-    end
-
-
-    // Generate instances only if needed, lane 0 always generated
     if (is_rs_instanciated) begin : rs_instance
+      logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
+      logic fu_ready;
+
+      logic [NrIssuePorts-1:0] rm_i;
+      logic [NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
+
+      for (int j = 0; j< NrIssuePorts; j++ ) begin
+        case (fu)
+          LOAD_STORE :
+            assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_we_i;
+
+          FLU :
+            assign we_i[j] = ((decoded_instr_i[0].fu == ALU && decoded_instr_i[1].fu == ALU) ?
+              ((j == 0) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == ALU
+              || decoded_instr_i[j].fu == CSR || decoded_instr_i[j].fu == MULT
+              || decoded_instr_i[j].fu == CTRL_FLOW) && !rollback_we_i;
+
+          // Since ALU2 and FPU share the same Wb port we only write instr to this rs if
+          // it is an fpu instr or it is an alu instruction and we already wrote one flu instr in
+          // the flu RS. That way we can try to dipacth as most as possible 2 instr to each alu when
+          // possible
+          FPU_ALU2 :
+            assign we_i[j] = ((decoded_instr_i[0].fu == ALU || decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
+            && (decoded_instr_i[1].fu == ALU ) ?
+            ((j == 1) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_we_i;
+
+        default : begin
+          assign we_i[j] = decoded_instr_i[j].fu == fu;
+        endcase
+      end
+
+      for (int j = 0; j< NrIssuePorts; j++ ) begin
+        assign rm_i[j] = tree_valid[j];
+        assign rm_id_i[j] = tree_results[j].global_rs_id;
+      end
+
+      case (fu)
+        FLU :
+          assign fu_ready = flu_ready_i;
+
+        FPU_ALU2 :
+          assign fu_ready = fpu_ready_i;
+
+        LOAD_STORE :
+          assign fu_ready = lsu_ready_i;
+
+        CVXIF :
+          assign fu_ready = xfu_ready_i;
+
+        default : begin
+          assign fu_ready = 1'b0;
+      end
+
+      logic en_fpr;
+
+      case (fu)
+        // if fpu not activated then only alu2 will use the FPU wb port
+        // so no need to check for fpr register dependency
+        FPU_ALU2 :
+          assign en_fpr = CVA6Cfg.FpPresent ? 1'b1 : 1'b0;
+
+        default :
+          assign en_fpr = is_fpr_used(fu);
+      endcase
+
       reservation_station #(
         .CVA6Cfg        (CVA6Cfg),
         .DATA_WIDTH     (CVA6Cfg.XLEN),
         .NR_READ_PORTS  (CVA6Cfg.NrRgprPorts),
         .ADDR_WIDTH     (CVA6Cfg.RegAddrWidth),
         .NR_RS_ENTRIES  (),
-        .FPR_ENABLED    (is_fpr_used(fu)),
+        .FPR_ENABLED    (en_fpr),
         .scoreboard_entry_t = (scoreboard_entry_t)
       ) i_reservation_station (
-        .clk_i   (clk_i),
-        .rst_ni  (rst_ni),
-        .we_i     ,
-        .rm_op_i, // op of the entry to remove
-        .rm_i, // do we remove the entry
-        .rm_id_i, // id of the entry to remove
-        .rm_rd_i, // dest reg of the entry to remove
-        .rs_restore_en_i, // id of the entry to remove
-        .decoded_instr_i,
-        .decoded_instr_ack_i,
-        .decoded_instr_o, //instructions found ready
-        .decoded_instr_valid_o, //is instruction valid
+        .clk_i                  (clk_i),
+        .rst_ni                 (rst_ni),
+        .we_i                   (we_i),
+        .rm_i                   (rm_i),
+        .rm_id_i                (rm_id_i),
+        .wb_rd_i                (waddr_i),
+        .wb_op_i,
+        .rs_restore_en_i        (flush_i),
+        .decoded_instr_i        (renamed_instr_i),
+        .decoded_instr_ack_i    (decoded_instr_ack),
+        .decoded_instr_o,
+        .decoded_instr_valid_o,
       );
       assign rs_results[i] = decoded_instr_o;
       assign rs_valid[i] = decoded_instr_valid_o && fu_ready;
@@ -527,12 +545,36 @@ module issue_stage
 
   //Finally we reorder instruction for 2 reasons
   //1. issue port 2 cannot execute CSR or CVXIF operations
-  //2. We cannot issue to ALU2 and FPU at the same time
-  if (tree_results[1].fu == CSR || tree_results[1].fu == CVXIF || tree_results[1].fu == ALU) begin
+  //2. CSR instruction forbids issuing 2 instuction at the same time
+
+  if (tree_results[0].fu == CSR) begin
+    assign issue_instr_sb_iro[0] = tree_results[0];
+    assign issue_instr_sb_iro[1] = tree_results[1];
+    assign issue_instr_valid_sb_iro[0] = tree_valid[0];
+    assign issue_instr_valid_sb_iro[1] = 1'b0;
+  end else if (tree_results[1].fu == CSR) begin
+    assign issue_instr_sb_iro[0] = tree_results[1];
+    assign issue_instr_sb_iro[1] = tree_results[0];
+    assign issue_instr_valid_sb_iro[0] = tree_valid[1];
+    assign issue_instr_valid_sb_iro[1] = 1'b0;
+  end else if (tree_results[1].fu == CVXIF) begin
     assign issue_instr_sb_iro[0] = tree_results[1];
     assign issue_instr_sb_iro[1] = tree_results[0];
     assign issue_instr_valid_sb_iro[0] = tree_valid[1];
     assign issue_instr_valid_sb_iro[1] = tree_valid[0];
+  end else begin
+    assign issue_instr_sb_iro[0] = tree_results[0];
+    assign issue_instr_sb_iro[1] = tree_results[1];
+    assign issue_instr_valid_sb_iro[0] = tree_valid[0];
+    assign issue_instr_valid_sb_iro[1] = tree_valid[1];
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni || flush_i) begin
+      global_rs_id_q <= '0;
+    end else begin
+      global_rs_id_q <= global_rs_id_n + CVA6Cfg.NrIssuePorts;
+    end
   end
 
   // ---------------------------------------------------------
