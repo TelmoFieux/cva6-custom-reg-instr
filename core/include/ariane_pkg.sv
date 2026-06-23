@@ -519,8 +519,8 @@ package ariane_pkg;
     FLU,
     LOAD_STORE,
     FPU_ALU2,
-    ACCEL, // not allowed yet on superscalar
-    CVXIF
+    F_ACCEL, // not allowed yet on superscalar
+    F_CVXIF
   } fu_phys;
 
   function automatic logic op_is_branch(input fu_op op);
@@ -531,12 +531,10 @@ package ariane_pkg;
   endfunction
 
   // does reservation station of one unit needs to keep track of fpr
-  function automatic logic is_fpr_used(input fu_module fu);
+  function automatic logic is_fpr_used(input fu_phys fu);
     unique case (fu) inside
-      FLU,
-      LOAD_STORE:
-      return 1'b0;
-      default: return 1'b1;  // all other fu
+      FLU, LOAD_STORE: return 1'b0;
+      default:         return 1'b1;  // all other fu
     endcase
   endfunction
 

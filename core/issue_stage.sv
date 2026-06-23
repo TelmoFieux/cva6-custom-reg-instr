@@ -383,22 +383,25 @@ module issue_stage
   // 2. Manage instructions in reservation stations
   // ---------------------------------------------------------
 
-  localparam int unsigned NR_FU = 5;
+  localparam int unsigned NR_WB = 5;
+  localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id_n, global_rs_id_q;
+  logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
+  fu_op                               wb_op_o;
 
-  for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-    renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+    assign renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
   end
 
-  scoreboard_entry_t [NR_FU-1:0] rs_results;
-  logic [NR_FU-1:0] rs_valid;
+  scoreboard_entry_t [NR_WB-1:0] rs_results;
+  logic [NR_WB-1:0] rs_valid;
 
-  scoreboard_entry_t [NR_FU-1:0] tree_results;
-  logic [NR_FU-1:0] tree_valid;
+  scoreboard_entry_t [NR_WB-1:0] tree_results;
+  logic [NR_WB-1:0] tree_valid;
 
-  for (int i = 0; i < NR_FU; i++) begin
+  for (genvar i = 0; i < NR_WB; i++) begin
     fu_phys fu;
-    fu = fu_phys'(i);
+    assign fu = fu_phys'(i);
 
     logic is_rs_instanciated;
 
@@ -406,13 +409,13 @@ module issue_stage
       FPU_ALU2 :
         assign is_rs_instanciated = CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent;
 
-      CVXIF :
+      F_CVXIF :
         assign is_rs_instanciated = CVA6Cfg.CvxifEn;
 
-      ACCEL :
+      F_ACCEL :
         assign is_rs_instanciated = '0; // not supported in superscalar mode
 
-      default : begin
+      default :
         assign is_rs_instanciated = 1'b1;
     endcase
 
@@ -420,10 +423,13 @@ module issue_stage
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
       logic fu_ready;
 
-      logic [NrIssuePorts-1:0] rm_i;
-      logic [NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
+      scoreboard_entry_t decoded_instr_o;
+      logic              decoded_instr_valid_o;
 
-      for (int j = 0; j< NrIssuePorts; j++ ) begin
+      logic [CVA6Cfg.NrIssuePorts-1:0] rm_i;
+      logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
+
+      for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin : g_write_enable
         case (fu)
           LOAD_STORE :
             assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_we_i;
@@ -443,12 +449,15 @@ module issue_stage
             && (decoded_instr_i[1].fu == ALU ) ?
             ((j == 1) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_we_i;
 
-        default : begin
-          assign we_i[j] = decoded_instr_i[j].fu == fu;
+          F_CVXIF :
+            assign we_i[j] = decoded_instr_i[j].fu == CVXIF;
+
+          default :
+            assign we_i[j] = '0;
         endcase
       end
 
-      for (int j = 0; j< NrIssuePorts; j++ ) begin
+      for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
         assign rm_i[j] = tree_valid[j];
         assign rm_id_i[j] = tree_results[j].global_rs_id;
       end
@@ -463,12 +472,12 @@ module issue_stage
         LOAD_STORE :
           assign fu_ready = lsu_ready_i;
 
-        CVXIF :
+        F_CVXIF :
           assign fu_ready = xfu_ready_i;
 
-        default : begin
+        default :
           assign fu_ready = 1'b0;
-      end
+      endcase
 
       logic en_fpr;
 
@@ -483,26 +492,29 @@ module issue_stage
       endcase
 
       reservation_station #(
-        .CVA6Cfg        (CVA6Cfg),
-        .DATA_WIDTH     (CVA6Cfg.XLEN),
-        .NR_READ_PORTS  (CVA6Cfg.NrRgprPorts),
-        .ADDR_WIDTH     (CVA6Cfg.RegAddrWidth),
-        .NR_RS_ENTRIES  (),
-        .FPR_ENABLED    (en_fpr),
-        .scoreboard_entry_t = (scoreboard_entry_t)
+        .CVA6Cfg            (CVA6Cfg),
+        .DATA_WIDTH         (CVA6Cfg.XLEN),
+        .NR_READ_PORTS      (CVA6Cfg.NrRgprPorts),
+        .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
+        .NR_RS_ENTRIES      (RS_SIZE),
+        .FPR_ENABLED        (en_fpr),
+        .scoreboard_entry_t (scoreboard_entry_t)
       ) i_reservation_station (
         .clk_i                  (clk_i),
         .rst_ni                 (rst_ni),
         .we_i                   (we_i),
         .rm_i                   (rm_i),
         .rm_id_i                (rm_id_i),
+        .wb_valid_i             (wt_valid_i),
         .wb_rd_i                (waddr_i),
-        .wb_op_i,
+        .wb_op_i                (wb_op_o),
+        .rollback_id_i          (rollback_id_o),
+        .rollback_en_i          (rollback_we_i),
         .rs_restore_en_i        (flush_i),
         .decoded_instr_i        (renamed_instr_i),
         .decoded_instr_ack_i    (decoded_instr_ack),
-        .decoded_instr_o,
-        .decoded_instr_valid_o,
+        .decoded_instr_o        (decoded_instr_o),
+        .decoded_instr_valid_o  (decoded_instr_valid_o)
       );
       assign rs_results[i] = decoded_instr_o;
       assign rs_valid[i] = decoded_instr_valid_o && fu_ready;
@@ -513,33 +525,35 @@ module issue_stage
   end
 
 
-  logic [NR_FU:0] tournament_valid_masked [CVA6Cfg.NrIssuePorts:0];
+  logic [NR_WB:0] tournament_valid_masked [CVA6Cfg.NrIssuePorts:0];
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num [CVA6Cfg.NrIssuePorts-1:0];
-  logic [NR_FU-1:0][$clog2(NR_FU)-1:0] tournament_id;
+  logic [NR_WB-1:0][$clog2(NR_WB)-1:0] tournament_id;
 
   assign tournament_valid_masked [0] = rs_valid;
 
-  for (genvar i = 0 ; i < NR_FU ; i++) begin
+  for (genvar i = 0 ; i < NR_WB ; i++) begin
     assign tournament_seq_num[i] = rs_results[i].global_rs_id;
     assign tournament_id[i] = i;
   end
 
   //cascade of tournament_tree in order to extract 2 instructions to issue
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
+    logic [$clog2(NR_WB)-1:0] winner_o;
+
     tournament_tree #(
         .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
-        .NR_PLAYER(NR_FU)
-    i_tournament_tree (
+        .NR_PLAYER(NR_WB)
+      ) i_tournament_tree (
         .valid_i    (tournament_valid_masked),
         .seq_num_i  (tournament_seq_num),
         .id_i       (tournament_id),
-        .winner_o,
+        .winner_o   (winner_o),
         .winner_valid_o (tree_valid)
     );
 
-    assign tree_results[i] = rs_results[winner_o]
+    assign tree_results[i] = rs_results[winner_o];
 
-    assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_FU'(1) << winner_o);
+    assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_WB'(1) << winner_o);
 
   end
 
@@ -604,9 +618,9 @@ module issue_stage
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
       .decoded_instr_ack_o     (decoded_instr_ack),
-      .issue_instr_o           (//j'ai enlevé cette valeur qui est drivé par les rs),
+      .issue_instr_o           (),//j'ai enlevé cette valeur qui est drivé par les rs)
       .orig_instr_o            (orig_instr_sb_iro),
-      .issue_instr_valid_o     (//aussi drivé par les rs),
+      .issue_instr_valid_o     (),//aussi drivé par les rs
       .issue_ack_i             (issue_ack_iro_sb),
       .fwd_o                   (fwd),
       .resolved_branch_i       (resolved_branch_i),
@@ -619,9 +633,11 @@ module issue_stage
       .rvfi_issue_pointer_o,
       .rvfi_commit_pointer_o,
       .rollback_rd_o           (rollback_rd_i),
+      .rollback_id_o,
       .rollback_old_phys_o     (rollback_old_phys_i),
       .rollback_op_o           (rollback_op_i),
-      .rollback_we_o           (rollback_we_i)
+      .rollback_we_o           (rollback_we_i),
+      .wb_op_o
   );
 
   // ---------------------------------------------------------

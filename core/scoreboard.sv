@@ -91,10 +91,18 @@ module scoreboard
     // Commit pointer - RVFI
     output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_commit_pointer_o,
 
+    // physical destination register to rollback - ISSUE_STAGE
     output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_o,
+    // global rs id of the instruction to remove - ISSUE_STAGE
+    output logic [CVA6Cfg.GlobalRsIdWidth-1:0]           rollback_id_o,
+    // old physical destination register to rollback - ISSUE_STAGE
     output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_o,
+    // is rollback active - ISSUE_STAGE
     output logic                                         rollback_we_o,
-    fu_op                                                rollback_op_o
+    // op of the instruction to rollback - ISSUE_STAGE
+    output fu_op                                         rollback_op_o,
+    // op of the instructions wrote back - ISSUE_STAGE
+    output fu_op [CVA6Cfg.NrWbPorts-1:0]                 wb_op_o
 
 );
 
@@ -240,6 +248,12 @@ module scoreboard
           mem_n[trans_id_i[i]].sbe.ex.cause = ex_i[i].cause;
         end
       end
+
+      if (wt_valid_i[i]) begin
+        wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;
+      end else begin
+        wb_op_o[i] = '0;
+      end
     end
 
     // ------------
@@ -336,6 +350,7 @@ module scoreboard
     bmiss_trans_id_n    = bmiss_trans_id_q;
     rollback_rd_o = '0;
     rollback_we_o = 1'b0;
+    rollback_id_o = '0;
     rollback_old_phys_o = '0;
     rollback_op_o = ADD;
 
@@ -360,6 +375,7 @@ module scoreboard
             rollback_we_o = 1'b0;
           end else begin
             rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
+            rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
             rollback_we_o = mem_q[rollback_pointer_q].issued;
             rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
             rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
