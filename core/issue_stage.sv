@@ -204,6 +204,7 @@ module issue_stage
 
   logic [CVA6Cfg.NrIssuePorts-1:0] issue_we_i;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] gpr_renamed_instr_i, fpr_renamed_instr_i;
+  logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id_n, global_rs_id_q;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] renamed_instr_i;
   rat_table_t                                   gpr_commit_rat, fpr_commit_rat;
   logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_i;
@@ -377,6 +378,9 @@ module issue_stage
     end else begin
       renamed_instr_i = gpr_renamed_instr_i;
     end
+    for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
+      renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
+    end
   end
 
   // ---------------------------------------------------------
@@ -385,13 +389,8 @@ module issue_stage
 
   localparam int unsigned NR_WB = 5;
   localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id_n, global_rs_id_q;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
-
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-    assign renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
-  end
 
   scoreboard_entry_t [NR_WB-1:0] rs_results;
   logic [NR_WB-1:0] rs_valid;
@@ -399,25 +398,14 @@ module issue_stage
   scoreboard_entry_t [NR_WB-1:0] tree_results;
   logic [NR_WB-1:0] tree_valid;
 
-  for (genvar i = 0; i < NR_WB; i++) begin
-    fu_phys fu;
-    assign fu = fu_phys'(i);
+  for (genvar i = 0; i < NR_WB; i++) begin : gen_rs_blocks
+    localparam fu_phys fu = fu_phys'(i);
 
-    logic is_rs_instanciated;
-
-    case (fu)
-      FPU_ALU2 :
-        assign is_rs_instanciated = CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent;
-
-      F_CVXIF :
-        assign is_rs_instanciated = CVA6Cfg.CvxifEn;
-
-      F_ACCEL :
-        assign is_rs_instanciated = '0; // not supported in superscalar mode
-
-      default :
-        assign is_rs_instanciated = 1'b1;
-    endcase
+    localparam logic is_rs_instanciated =
+        (fu == FPU_ALU2) ? (CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent) :
+        (fu == F_CVXIF)  ? CVA6Cfg.CvxifEn :
+        (fu == F_ACCEL)  ? 1'b0 : //not yet supported in superscalar mode
+        1'b1;
 
     if (is_rs_instanciated) begin : rs_instance
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
@@ -479,17 +467,11 @@ module issue_stage
           assign fu_ready = 1'b0;
       endcase
 
-      logic en_fpr;
-
-      case (fu)
-        // if fpu not activated then only alu2 will use the FPU wb port
-        // so no need to check for fpr register dependency
-        FPU_ALU2 :
-          assign en_fpr = CVA6Cfg.FpPresent ? 1'b1 : 1'b0;
-
-        default :
-          assign en_fpr = is_fpr_used(fu);
-      endcase
+      // if fpu not activated then only alu2 will use the FPU wb port
+      // so no need to check for fpr register dependency
+      localparam logic en_fpr =
+        (fu == FPU_ALU2) ? (CVA6Cfg.FpPresent) :
+        is_fpr_used(fu);
 
       reservation_station #(
         .CVA6Cfg            (CVA6Cfg),
@@ -525,9 +507,9 @@ module issue_stage
   end
 
 
-  logic [NR_WB:0] tournament_valid_masked [CVA6Cfg.NrIssuePorts:0];
-  logic [CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num [CVA6Cfg.NrIssuePorts-1:0];
-  logic [NR_WB-1:0][$clog2(NR_WB)-1:0] tournament_id;
+  logic [CVA6Cfg.NrIssuePorts:0][NR_WB-1:0]         tournament_valid_masked;
+  logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
+  logic [NR_WB-1:0][$clog2(NR_WB)-1:0]              tournament_id;
 
   assign tournament_valid_masked [0] = rs_valid;
 
@@ -539,19 +521,21 @@ module issue_stage
   //cascade of tournament_tree in order to extract 2 instructions to issue
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
     logic [$clog2(NR_WB)-1:0] winner_o;
+    logic winner_valid_o;
 
     tournament_tree #(
         .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
         .NR_PLAYER(NR_WB)
       ) i_tournament_tree (
-        .valid_i    (tournament_valid_masked),
+        .valid_i    (tournament_valid_masked[i]),
         .seq_num_i  (tournament_seq_num),
         .id_i       (tournament_id),
         .winner_o   (winner_o),
-        .winner_valid_o (tree_valid)
+        .winner_valid_o (winner_valid_o)
     );
 
     assign tree_results[i] = rs_results[winner_o];
+    assign tree_valid[i] = winner_valid_o;
 
     assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_WB'(1) << winner_o);
 

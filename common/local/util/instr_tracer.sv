@@ -217,27 +217,37 @@ module instr_tracer #(
     bp              = {};
   endfunction
 
-  function void printInstr(scoreboard_entry_t sbe, logic [31:0] instr, logic [63:0] result, logic [CVA6Cfg.PLEN-1:0] paddr, riscv::priv_lvl_t priv_lvl, logic debug_mode, bp_resolve_t bp);
+  function automatic void printInstr(scoreboard_entry_t sbe, logic [31:0] instr, logic [63:0] result, logic [CVA6Cfg.PLEN-1:0] paddr, riscv::priv_lvl_t priv_lvl, logic debug_mode, bp_resolve_t bp);
+    // 1. Toutes les déclarations de variables impérativement en haut
     instr_trace_item #(
       .CVA6Cfg(CVA6Cfg),
       .bp_resolve_t(bp_resolve_t),
       .scoreboard_entry_t(scoreboard_entry_t)
-    ) iti = new ($time, clk_ticks, sbe, instr, gp_reg_file, fp_reg_file, result, paddr, priv_lvl, debug_mode, bp);
+    ) iti;
+    string print_instr;
+
+    // 2. Code exécutable et affectations ensuite
+    iti = new ($time, clk_ticks, sbe, instr, gp_reg_file, fp_reg_file, result, paddr, priv_lvl, debug_mode, bp);
     // print instruction to console
-    automatic string print_instr = iti.printInstr();
+    print_instr = iti.printInstr();
     if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && !debug_mode) begin
       $fwrite(commit_log, riscv::spikeCommitLog(sbe.pc, priv_lvl, instr, sbe.rd, result, ariane_pkg::is_rd_fpr(sbe.op)));
     end
     $fwrite(f, {print_instr, "\n"});
   endfunction
 
-  function void printException(logic [CVA6Cfg.VLEN-1:0] pc, logic [63:0] cause, logic [63:0] tval);
+  function automatic void printException(logic [CVA6Cfg.VLEN-1:0] pc, logic [63:0] cause, logic [63:0] tval);
+    // 1. Toutes les déclarations de variables impérativement en haut
     ex_trace_item #(
       .CVA6Cfg(CVA6Cfg),
       .interrupts_t(interrupts_t),
       .INTERRUPTS(INTERRUPTS)
-    ) eti = new (pc, cause, tval);
-    automatic string print_ex = eti.printException();
+    ) eti;
+    string print_ex;
+
+    // 2. Code exécutable et affectations ensuite
+    eti = new (pc, cause, tval);
+    print_ex = eti.printException();
     $fwrite(f, {print_ex, "\n"});
   endfunction
 

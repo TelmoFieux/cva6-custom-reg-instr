@@ -170,18 +170,6 @@ module reservation_station
             is_result_available_gpr_n[wb_rd_i[j]] = 1'b1;
           end
         end
-      end else begin
-        if (rs_q.free_entries[i] == 0) begin
-          if (FPR_ENABLED) begin
-            if (is_rd_fpr(rs_q.rs_table[i].op)) begin
-              is_result_available_fpr_n[rs_q.rs_table[i].rd] = 1'b1;
-            end else begin
-              is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
-            end
-          end else begin
-            is_result_available_gpr_n[rs_q.rs_table[i].rd] = 1'b1;
-          end
-        end
       end
 
       //Here we update the validity of operands for each instr
@@ -248,6 +236,7 @@ module reservation_station
             end
           end
         end
+        end
 
         //Finally we define the default behavior
         if (!FPR_ENABLED) begin
@@ -264,15 +253,15 @@ module reservation_station
           end
         end else begin
           if (i == alloc_idx[j]) begin
-            updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[j].rs1) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[j].rs1];
-            updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[j].rs2) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[j].rs2];
+            updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[j].rs1];
+            updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[j].rs2];
             if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
-              updated_regs[i][2] = is_imm_fpr(decoded_instr_i[j].result) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[j].result];
+              updated_regs[i][2] = is_imm_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].result] : is_result_available_gpr_q[decoded_instr_i[j].result];
           end else begin
-            updated_regs[i][0] = is_rs1_fpr(rs_q.rs_table[i].rs1) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
-            updated_regs[i][1] = is_rs2_fpr(rs_q.rs_table[i].rs2) ? is_result_available_fpr_q[rs_q.rs_table[i].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
+            updated_regs[i][0] = is_rs1_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
+            updated_regs[i][1] = is_rs2_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
             if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm)
-              updated_regs[i][2] = is_imm_fpr(rs_q.rs_table[i].result) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+              updated_regs[i][2] = is_imm_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
           end
         end
       end
@@ -282,21 +271,34 @@ module reservation_station
       //First we check select RAW result if valid then forwarding result and finally default result
       for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
         if (decoded_instr_ack_i[j] == 1'b1 && !rs_restore_en_i) begin
-          if (i == alloc_idx[1] && we_i[1]) begin
+          if (CVA6Cfg.NrIssuePorts > 1 && i == alloc_idx[1] && we_i[1]) begin
             rs_n.valid_regs[i][0] = RAW_updated_regs[i][0] == 1'b1 ? (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0]) : RAW_updated_regs[i][0];
             rs_n.valid_regs[i][1] = RAW_updated_regs[i][1] == 1'b1 ? (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1]) : RAW_updated_regs[i][1];
-            rs_n.valid_regs[i][2] = RAW_updated_regs[i][2] == 1'b1 ? (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2]) : RAW_updated_regs[i][2];
+            if (NR_READ_PORTS == 3)
+              rs_n.valid_regs[i][2] = RAW_updated_regs[i][2] == 1'b1 ? (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2]) : RAW_updated_regs[i][2];
           end else begin
             rs_n.valid_regs[i][0] = forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0];
             rs_n.valid_regs[i][1] = forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1];
-            rs_n.valid_regs[i][2] = forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2];
+            if (NR_READ_PORTS == 3)
+              rs_n.valid_regs[i][2] = forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2];
           end
         end else begin
           rs_n.valid_regs[i][0] = updated_regs[i][0];
           rs_n.valid_regs[i][1] = updated_regs[i][1];
-          rs_n.valid_regs[i][2] = updated_regs[i][2];
+          if (NR_READ_PORTS == 3)
+            rs_n.valid_regs[i][2] = updated_regs[i][2];
+        end
+
+        //exception were triggered in the earlier stages of the pipeline
+        if (i == alloc_idx[j])
+          if (decoded_instr_i[j].ex.valid)
+            rs_n.valid_regs[i] = '1;
+        end else if (rs_n.rs_table[i].ex.valid) begin
+            rs_n.valid_regs[i] = '1;
         end
       end
+
+
 
 
     end
@@ -304,6 +306,10 @@ module reservation_station
 
     if (rs_restore_en_i) begin
       rs_n.free_entries = '1;
+      is_result_available_gpr_n = '1;
+      if (FPR_ENABLED) begin
+        is_result_available_fpr_n = '1;
+      end
     end
   end
 
