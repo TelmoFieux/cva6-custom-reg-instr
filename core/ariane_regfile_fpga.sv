@@ -59,8 +59,8 @@ module ariane_regfile_fpga #(
   logic [CVA6Cfg.NrCommitPorts-1:0][DATA_WIDTH-1:0] wdata_reg;
   logic [NR_READ_PORTS-1:0] read_after_write;
 
-  logic [NR_READ_PORTS-1:0][4:0] raddr_q;
-  logic [NR_READ_PORTS-1:0][4:0] raddr;
+  logic [NR_READ_PORTS-1:0][ADDR_WIDTH-1:0] raddr_q;
+  logic [NR_READ_PORTS-1:0][ADDR_WIDTH-1:0] raddr;
 
   // write adress decoder (for block selector)
   always_comb begin

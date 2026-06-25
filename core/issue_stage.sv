@@ -186,6 +186,10 @@ module issue_stage
     scoreboard_entry_t [CVA6Cfg.NR_SB_ENTRIES-1:0] sbe;
   } forwarding_t;
 
+  // In superscalar mode they are doubled so we divide it by two to get the number of operand max
+  // per instr
+  localparam int unsigned NR_READ_PORTS = CVA6Cfg.NrRgprPorts / 2;
+
   forwarding_t                                        fwd;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_sb_iro;
   logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_sb_iro;
@@ -212,11 +216,9 @@ module issue_stage
   logic                                         rollback_we_i;
   fu_op                                         rollback_op_i;
   logic                                         gpr_rollback_we_i;
-  logic [CVA6Cfg.NrIssuePorts-1:0]              decoded_instr_ack;
+  logic [CVA6Cfg.NrIssuePorts-1:0]              issue_instr_ack;
 
   assign rollback_en_o = rollback_we_i;
-  assign decoded_instr_ack_o = decoded_instr_ack;
-
 
   //We only modify the RAT corrsponding to the correct registers
   always_comb begin : gpr_we
@@ -238,7 +240,7 @@ module issue_stage
   register_allocation_table #(
         .CVA6Cfg      (CVA6Cfg),
         .DATA_WIDTH   (CVA6Cfg.XLEN),
-        .NR_READ_PORTS(CVA6Cfg.NrRgprPorts),
+        .NR_READ_PORTS(NR_READ_PORTS),
         .ADDR_WIDTH   (CVA6Cfg.RegAddrWidth),
         .COMMIT_RAT   (1'b0),
         .FPR_RAT      (1'b0),
@@ -256,7 +258,7 @@ module issue_stage
         .rollback_old_phys_i     (rollback_old_phys_i),
         .rollback_we_i           (gpr_rollback_we_i),
         .decoded_instr_i         (decoded_instr_i),
-        .decoded_instr_ack_i     (decoded_instr_ack),
+        .decoded_instr_ack_i     (decoded_instr_ack_o),
         .renamed_instr_o         (gpr_renamed_instr_i),
         .rat_state_o             (),
         .rat_restore_state_i     (gpr_commit_rat),
@@ -266,7 +268,7 @@ module issue_stage
   register_allocation_table #(
         .CVA6Cfg      (CVA6Cfg),
         .DATA_WIDTH   (CVA6Cfg.XLEN),
-        .NR_READ_PORTS(CVA6Cfg.NrRgprPorts),
+        .NR_READ_PORTS(NR_READ_PORTS),
         .ADDR_WIDTH   (CVA6Cfg.RegAddrWidth),
         .COMMIT_RAT   (1'b1),
         .FPR_RAT      (1'b0),
@@ -284,7 +286,7 @@ module issue_stage
         .rollback_old_phys_i     (rollback_old_phys_i),
         .rollback_we_i           (1'b0),
         .decoded_instr_i         (decoded_instr_i),
-        .decoded_instr_ack_i     (decoded_instr_ack),
+        .decoded_instr_ack_i     (decoded_instr_ack_o),
         .renamed_instr_o         (),
         .rat_state_o             (gpr_commit_rat),
         .rat_restore_state_i     ('0),
@@ -310,7 +312,7 @@ module issue_stage
     register_allocation_table #(
           .CVA6Cfg      (CVA6Cfg),
           .DATA_WIDTH   (CVA6Cfg.XLEN),
-          .NR_READ_PORTS(CVA6Cfg.NrRgprPorts),
+          .NR_READ_PORTS(NR_READ_PORTS),
           .ADDR_WIDTH   (CVA6Cfg.RegAddrWidth),
           .COMMIT_RAT   (1'b0),
           .FPR_RAT      (1'b1),
@@ -328,7 +330,7 @@ module issue_stage
           .rollback_old_phys_i     (rollback_old_phys_i),
           .rollback_we_i           (fpr_rollback_we_i),
           .decoded_instr_i         (decoded_instr_i),
-          .decoded_instr_ack_i     (decoded_instr_ack),
+          .decoded_instr_ack_i     (decoded_instr_ack_o),
           .renamed_instr_o         (fpr_renamed_instr_i),
           .rat_state_o             (),
           .rat_restore_state_i     (fpr_commit_rat),
@@ -339,7 +341,7 @@ module issue_stage
     register_allocation_table #(
           .CVA6Cfg      (CVA6Cfg),
           .DATA_WIDTH   (CVA6Cfg.XLEN),
-          .NR_READ_PORTS(CVA6Cfg.NrRgprPorts),
+          .NR_READ_PORTS(NR_READ_PORTS),
           .ADDR_WIDTH   (CVA6Cfg.RegAddrWidth),
           .COMMIT_RAT   (1'b1),
           .FPR_RAT      (1'b1),
@@ -357,7 +359,7 @@ module issue_stage
           .rollback_old_phys_i     (rollback_old_phys_i),
           .rollback_we_i           (1'b0),
           .decoded_instr_i         (decoded_instr_i),
-          .decoded_instr_ack_i     (decoded_instr_ack),
+          .decoded_instr_ack_i     (decoded_instr_ack_o),
           .renamed_instr_o         (),
           .rat_state_o             (fpr_commit_rat),
           .rat_restore_state_i     ('0),
@@ -394,9 +396,11 @@ module issue_stage
 
   scoreboard_entry_t [NR_WB-1:0] rs_results;
   logic [NR_WB-1:0] rs_valid;
+  logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_full;
 
-  scoreboard_entry_t [NR_WB-1:0] tree_results;
-  logic [NR_WB-1:0] tree_valid;
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] tree_results;
+  logic [CVA6Cfg.NrIssuePorts-1:0] tree_valid;
+
 
   for (genvar i = 0; i < NR_WB; i++) begin : gen_rs_blocks
     localparam fu_phys fu = fu_phys'(i);
@@ -411,8 +415,9 @@ module issue_stage
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
       logic fu_ready;
 
-      scoreboard_entry_t decoded_instr_o;
-      logic              decoded_instr_valid_o;
+      scoreboard_entry_t               decoded_instr_o;
+      logic                            decoded_instr_valid_o;
+      logic [CVA6Cfg.NrIssuePorts-1:0] rs_full_o;
 
       logic [CVA6Cfg.NrIssuePorts-1:0] rm_i;
       logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
@@ -423,22 +428,24 @@ module issue_stage
             assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_we_i;
 
           FLU :
-            assign we_i[j] = ((decoded_instr_i[0].fu == ALU && decoded_instr_i[1].fu == ALU) ?
-              ((j == 0) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == ALU
+            assign we_i[j] = (((decoded_instr_i[0].fu == ALU || decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
+                  && decoded_instr_i[1].fu == ALU) ?
+                  ((j == 0) ? 1'b1 : 1'b0) :
+              decoded_instr_i[j].fu == ALU
               || decoded_instr_i[j].fu == CSR || decoded_instr_i[j].fu == MULT
-              || decoded_instr_i[j].fu == CTRL_FLOW) && !rollback_we_i;
+              || decoded_instr_i[j].fu == CTRL_FLOW || decoded_instr_i[j].fu == NONE) && !rollback_we_i;
 
           // Since ALU2 and FPU share the same Wb port we only write instr to this rs if
           // it is an fpu instr or it is an alu instruction and we already wrote one flu instr in
           // the flu RS. That way we can try to dipacth as most as possible 2 instr to each alu when
           // possible
           FPU_ALU2 :
-            assign we_i[j] = ((decoded_instr_i[0].fu == ALU || decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
-            && (decoded_instr_i[1].fu == ALU ) ?
+            assign we_i[j] = (((decoded_instr_i[0].fu == ALU || decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
+            && decoded_instr_i[1].fu == ALU ) ?
             ((j == 1) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_we_i;
 
           F_CVXIF :
-            assign we_i[j] = decoded_instr_i[j].fu == CVXIF;
+            assign we_i[j] = decoded_instr_i[j].fu == CVXIF && !rollback_we_i;
 
           default :
             assign we_i[j] = '0;
@@ -476,7 +483,7 @@ module issue_stage
       reservation_station #(
         .CVA6Cfg            (CVA6Cfg),
         .DATA_WIDTH         (CVA6Cfg.XLEN),
-        .NR_READ_PORTS      (CVA6Cfg.NrRgprPorts),
+        .NR_READ_PORTS      (NR_READ_PORTS),
         .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
         .NR_RS_ENTRIES      (RS_SIZE),
         .FPR_ENABLED        (en_fpr),
@@ -484,6 +491,7 @@ module issue_stage
       ) i_reservation_station (
         .clk_i                  (clk_i),
         .rst_ni                 (rst_ni),
+        .full_o                 (rs_full_o),
         .we_i                   (we_i),
         .rm_i                   (rm_i),
         .rm_id_i                (rm_id_i),
@@ -494,18 +502,32 @@ module issue_stage
         .rollback_en_i          (rollback_we_i),
         .rs_restore_en_i        (flush_i),
         .decoded_instr_i        (renamed_instr_i),
-        .decoded_instr_ack_i    (decoded_instr_ack),
+        .decoded_instr_ack_i    (issue_instr_ack),
         .decoded_instr_o        (decoded_instr_o),
         .decoded_instr_valid_o  (decoded_instr_valid_o)
       );
       assign rs_results[i] = decoded_instr_o;
       assign rs_valid[i] = decoded_instr_valid_o && fu_ready;
+      assign rs_full[i] = rs_full_o & we_i;
     end else begin
       assign rs_results[i] = '0;
       assign rs_valid[i] = '0;
+      assign rs_full[i] = '0;
     end
   end
 
+  // represent if instructions have been accepted by th rs
+  logic [CVA6Cfg.NrIssuePorts-1:0] final_rs_full;
+
+  always_comb begin
+    final_rs_full = '0;
+    for (int i = 0; i < NR_WB; i++) begin
+      final_rs_full |= rs_full[i];
+    end
+  end
+
+  //if rs and scoreboard succesfully added the instr we validate the Handshake
+  assign decoded_instr_ack_o = issue_instr_ack & ~final_rs_full;
 
   logic [CVA6Cfg.NrIssuePorts:0][NR_WB-1:0]         tournament_valid_masked;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
@@ -571,7 +593,7 @@ module issue_stage
     if (!rst_ni || flush_i) begin
       global_rs_id_q <= '0;
     end else begin
-      global_rs_id_q <= global_rs_id_n + CVA6Cfg.NrIssuePorts;
+      global_rs_id_q <= global_rs_id_q + CVA6Cfg.NrIssuePorts;
     end
   end
 
@@ -601,11 +623,11 @@ module issue_stage
       .decoded_instr_i         (renamed_instr_i),
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
-      .decoded_instr_ack_o     (decoded_instr_ack),
+      .decoded_instr_ack_i     (decoded_instr_ack_o),
       .issue_instr_o           (),//j'ai enlevé cette valeur qui est drivé par les rs)
       .orig_instr_o            (orig_instr_sb_iro),
-      .issue_instr_valid_o     (),//aussi drivé par les rs
-      .issue_ack_i             (issue_ack_iro_sb),
+      .issue_instr_valid_o     (issue_instr_ack),//aussi drivé par les rs
+      .issue_ack_i             (),
       .fwd_o                   (fwd),
       .resolved_branch_i       (resolved_branch_i),
       .trans_id_i              (trans_id_i),

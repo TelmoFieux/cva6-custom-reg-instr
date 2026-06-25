@@ -25,7 +25,7 @@ module tournament_tree #(
   localparam int unsigned TREE_SIZE = NR_PLAYER*2;
 
   logic [TREE_SIZE-1:0][ID_SIZE-1:0] seq_num_tree;
-  logic [TREE_SIZE-1:0][$clog2(ID_SIZE)-1:0] id_tree;
+  logic [TREE_SIZE-1:0][$clog2(NR_PLAYER)-1:0] id_tree;
   logic [TREE_SIZE-1:0] valid_tree;
 
   always_comb begin : tournament

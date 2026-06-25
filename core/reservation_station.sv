@@ -33,22 +33,23 @@ module reservation_station
     parameter int unsigned           FPR_ENABLED   = 0,
     parameter type scoreboard_entry_t = logic
 ) (
-    input logic                                                         clk_i,
-    input logic                                                         rst_ni,
-    input logic [CVA6Cfg.NrIssuePorts-1:0]                              we_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0]                              rm_i, // do we remove the entry
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i, // id of the entry to remove
-    input logic [CVA6Cfg.NrWbPorts-1:0]                                 wb_valid_i,
-    input logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 wb_rd_i, // dest reg of the entry to remove
-    input fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
-    input logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           rollback_id_i, // id of the entry to rollback
-    input logic                                                         rollback_en_i, // is rollback enabled
-    input logic                                                         rs_restore_en_i, // id of the entry to remove
+    input  logic                                                         clk_i,
+    input  logic                                                         rst_ni,
+    output logic [CVA6Cfg.NrIssuePorts-1:0]                              full_o, // is rs full
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                              we_i,
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                              rm_i, // do we remove the entry
+    input  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i, // id of the entry to remove
+    input  logic [CVA6Cfg.NrWbPorts-1:0]                                 wb_valid_i,
+    input  logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 wb_rd_i, // dest reg of the entry to remove
+    input  fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
+    input  logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           rollback_id_i, // id of the entry to rollback
+    input  logic                                                         rollback_en_i, // is rollback enabled
+    input  logic                                                         rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
-    output scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_o, //instructions found ready
-    input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_o //is instruction valid
+    output scoreboard_entry_t                                           decoded_instr_o, //instructions found ready
+    output logic                                                        decoded_instr_valid_o //is instruction valid
 );
 
   localparam NUM_REG = 2 ** ADDR_WIDTH;
@@ -66,26 +67,32 @@ module reservation_station
   reservation_station_t rs_n, rs_q;
 
 
-  logic [NR_RS_ENTRIES-1:0] free_entries_masked [CVA6Cfg.NrIssuePorts:0];
-  logic [$clog2(NR_RS_ENTRIES):0] alloc_idx    [CVA6Cfg.NrIssuePorts-1:0];
+  logic [CVA6Cfg.NrIssuePorts:0][NR_RS_ENTRIES-1:0] free_entries_masked;
+  logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
+  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(NR_RS_ENTRIES):0] alloc_idx;
 
   assign free_entries_masked[0] = rs_q.free_entries;
 
   //priority encoder cascade to get free index in RS
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
       lzc #(
-          .WIDTH(NUM_REG),
+          .WIDTH(NR_RS_ENTRIES),
           .MODE(1'b0))
       i_lzc (
           .in_i   (free_entries_masked[i]),
           .cnt_o  (alloc_idx[i]),
-          .empty_o()
+          .empty_o(empty_mask[i])
       );
 
-      assign free_entries_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) ?
+      // assign free_entries_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && empty_mask[i] == 1'b0) ?
+      //   (free_entries_masked[i] & ~(NR_RS_ENTRIES'(1) << alloc_idx[i])) :
+      //   free_entries_masked[i];
+      assign free_entries_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && empty_mask[i] == 1'b0) ?
         (free_entries_masked[i] & ~(NR_RS_ENTRIES'(1) << alloc_idx[i])) :
         free_entries_masked[i];
   end
+
+  assign full_o = empty_mask;
 
   logic [NR_RS_ENTRIES-1:0] tournament_valid;
   logic [NR_RS_ENTRIES-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num;
@@ -96,7 +103,7 @@ module reservation_station
   logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] forwarding_updated_regs;
 
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
-    assign tournament_valid[i] = rs_q.valid_regs[i] == '1 ? 1'b1 : 1'b0;
+    assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ? (rs_q.valid_regs[i] == '1 ? 1'b1 : 1'b0) : 1'b0;
     assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
     assign tournament_id[i] = i;
   end
@@ -126,9 +133,25 @@ module reservation_station
       is_result_available_fpr_n = is_result_available_fpr_q;
     end
 
+    //updating based on write back
+    for (int i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
+      if (wb_valid_i[i]) begin
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(wb_op_i[i])) begin
+            is_result_available_fpr_n[wb_rd_i[i]] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[wb_rd_i[i]] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[wb_rd_i[i]] = 1'b1;
+        end
+      end
+    end
+
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (decoded_instr_ack_i[i]) begin
-        if (we_i[i] && (decoded_instr_i[i].rd != '0)) begin
+        // if (we_i[i] && (decoded_instr_i[i].rd != '0)) begin
+        if (we_i[i] && empty_mask[i] == 1'b0) begin
           rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
         end
 
@@ -149,25 +172,16 @@ module reservation_station
     updated_regs = rs_q.valid_regs;
     forwarding_updated_regs = '0;
 
-    //removing instr after it finished executing
+    //removing instr after it was selected to be executed
     //or because of rollback triggered by exception or branch miss.
     //but in both case it is the same mechanism so we use the same signal
     rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
       if (!rs_restore_en_i) begin
         for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-          if (rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id
-            || rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id) begin
+          if ((rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id
+            || rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id) && !rs_q.free_entries[i]) begin
             rs_n.free_entries[i] = 1'b1;
-          end
-          if (FPR_ENABLED) begin
-            if (is_rd_fpr(wb_op_i[j])) begin
-              is_result_available_fpr_n[wb_rd_i[j]] = 1'b1;
-            end else begin
-              is_result_available_gpr_n[wb_rd_i[j]] = 1'b1;
-            end
-          end else begin
-            is_result_available_gpr_n[wb_rd_i[j]] = 1'b1;
           end
         end
       end
@@ -195,7 +209,7 @@ module reservation_station
         for (int k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
           if (wb_valid_i[k]) begin
             if (!FPR_ENABLED) begin
-              if (i == alloc_idx[j]) begin
+              if (i == alloc_idx[j] && empty_mask[i] == 1'b0) begin
                 if (wb_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
                 if (wb_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
                 if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
@@ -209,7 +223,7 @@ module reservation_station
                 end
               end
             end else begin
-              if (i == alloc_idx[j]) begin
+              if (i == alloc_idx[j] && empty_mask[i] == 1'b0) begin
                 if (is_rd_fpr(wb_op_i[k]) == is_rs1_fpr(decoded_instr_i[j].op)) begin
                   if (wb_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
                 end
@@ -240,7 +254,7 @@ module reservation_station
 
         //Finally we define the default behavior
         if (!FPR_ENABLED) begin
-          if (i == alloc_idx[j]) begin
+          if (i == alloc_idx[j] && empty_mask[i] == 1'b0) begin
             updated_regs[i][0] = is_result_available_gpr_q[decoded_instr_i[j].rs1];
             updated_regs[i][1] = is_result_available_gpr_q[decoded_instr_i[j].rs2];
             if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
@@ -252,7 +266,7 @@ module reservation_station
               updated_regs[i][2] = is_result_available_gpr_q[rs_q.rs_table[i].result];
           end
         end else begin
-          if (i == alloc_idx[j]) begin
+          if (i == alloc_idx[j] && empty_mask[i] == 1'b0) begin
             updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs1] : is_result_available_gpr_q[decoded_instr_i[j].rs1];
             updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_q[decoded_instr_i[j].rs2] : is_result_available_gpr_q[decoded_instr_i[j].rs2];
             if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
@@ -271,7 +285,7 @@ module reservation_station
       //First we check select RAW result if valid then forwarding result and finally default result
       for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
         if (decoded_instr_ack_i[j] == 1'b1 && !rs_restore_en_i) begin
-          if (CVA6Cfg.NrIssuePorts > 1 && i == alloc_idx[1] && we_i[1]) begin
+          if (CVA6Cfg.NrIssuePorts > 1 && i == alloc_idx[1] && we_i[1] && empty_mask[i] == 1'b0) begin
             rs_n.valid_regs[i][0] = RAW_updated_regs[i][0] == 1'b1 ? (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0]) : RAW_updated_regs[i][0];
             rs_n.valid_regs[i][1] = RAW_updated_regs[i][1] == 1'b1 ? (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1]) : RAW_updated_regs[i][1];
             if (NR_READ_PORTS == 3)
@@ -290,10 +304,11 @@ module reservation_station
         end
 
         //exception were triggered in the earlier stages of the pipeline
-        if (i == alloc_idx[j])
-          if (decoded_instr_i[j].ex.valid)
+        if (i == alloc_idx[j] && empty_mask[i] == 1'b0) begin
+          if (decoded_instr_i[j].ex.valid || decoded_instr_i[j].fu == NONE)
             rs_n.valid_regs[i] = '1;
-        end else if (rs_n.rs_table[i].ex.valid) begin
+        end else begin
+          if (rs_q.rs_table[i].ex.valid || rs_q.rs_table[i].fu == NONE)
             rs_n.valid_regs[i] = '1;
         end
       end
@@ -306,6 +321,8 @@ module reservation_station
 
     if (rs_restore_en_i) begin
       rs_n.free_entries = '1;
+      rs_n.valid_regs = '0;
+      rs_n.rs_table = '0;
       is_result_available_gpr_n = '1;
       if (FPR_ENABLED) begin
         is_result_available_fpr_n = '1;
@@ -316,6 +333,8 @@ module reservation_station
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       rs_q.free_entries <= '1;
+      rs_q.valid_regs   <= '0;
+      rs_q.rs_table     <= '0;
       if (FPR_ENABLED) begin
         is_result_available_fpr_q <= '1;
       end
