@@ -368,6 +368,9 @@ module issue_stage
   end
 
   always_comb begin : reg_sel
+    logic [CVA6Cfg.GlobalRsIdWidth-1:0] id_counter;
+    id_counter = global_rs_id_q;
+
     if (CVA6Cfg.FpPresent) begin
       renamed_instr_i = decoded_instr_i;
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
@@ -380,9 +383,15 @@ module issue_stage
     end else begin
       renamed_instr_i = gpr_renamed_instr_i;
     end
-    for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
-      renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+        renamed_instr_i[i].global_rs_id = id_counter;
+        renamed_instr_i[i].trans_id     = rvfi_issue_pointer_o[i];
+        if (decoded_instr_ack_o[i]) begin
+            id_counter = id_counter + 1;
+        end
     end
+
+    global_rs_id_n = id_counter;
   end
 
   // ---------------------------------------------------------
@@ -452,7 +461,13 @@ module issue_stage
         endcase
       end
 
-      for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
+      // if fpu not activated then only alu2 will use the FPU wb port
+      // so no need to check for fpr register dependency
+      localparam logic en_fpr =
+        (fu == FPU_ALU2) ? (CVA6Cfg.FpPresent) :
+        is_fpr_used(fu);
+
+        for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
         assign rm_i[j] = tree_valid[j];
         assign rm_id_i[j] = tree_results[j].global_rs_id;
       end
@@ -462,7 +477,7 @@ module issue_stage
           assign fu_ready = flu_ready_i;
 
         FPU_ALU2 :
-          assign fu_ready = fpu_ready_i;
+          assign fu_ready = en_fpr ? fpu_ready_i : 1'b1;
 
         LOAD_STORE :
           assign fu_ready = lsu_ready_i;
@@ -474,11 +489,7 @@ module issue_stage
           assign fu_ready = 1'b0;
       endcase
 
-      // if fpu not activated then only alu2 will use the FPU wb port
-      // so no need to check for fpr register dependency
-      localparam logic en_fpr =
-        (fu == FPU_ALU2) ? (CVA6Cfg.FpPresent) :
-        is_fpr_used(fu);
+
 
       reservation_station #(
         .CVA6Cfg            (CVA6Cfg),
@@ -502,7 +513,7 @@ module issue_stage
         .rollback_en_i          (rollback_we_i),
         .rs_restore_en_i        (flush_i),
         .decoded_instr_i        (renamed_instr_i),
-        .decoded_instr_ack_i    (issue_instr_ack),
+        .decoded_instr_ack_i    (decoded_instr_ack_o),
         .decoded_instr_o        (decoded_instr_o),
         .decoded_instr_valid_o  (decoded_instr_valid_o)
       );
@@ -593,7 +604,7 @@ module issue_stage
     if (!rst_ni || flush_i) begin
       global_rs_id_q <= '0;
     end else begin
-      global_rs_id_q <= global_rs_id_q + CVA6Cfg.NrIssuePorts;
+      global_rs_id_q <= global_rs_id_n;
     end
   end
 
