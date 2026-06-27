@@ -201,6 +201,9 @@ module issue_stage
 
   logic x_transaction_accepted_iro_sb, x_issue_writeback_iro_sb;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] x_id_iro_sb;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o,
+  logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o,
+  logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o,
 
   // ---------------------------------------------------------
   // 1. Renaming instructions
@@ -223,7 +226,7 @@ module issue_stage
   //We only modify the RAT corrsponding to the correct registers
   always_comb begin : gpr_we
     if (!CVA6Cfg.FpPresent) begin
-      issue_we_i = '0;
+      issue_we_i = '1;
       gpr_rollback_we_i = rollback_we_i;
     end else begin
       gpr_rollback_we_i = is_rd_fpr(rollback_op_i) ? 1'b0 : rollback_we_i;
@@ -647,6 +650,9 @@ module issue_stage
       .wt_valid_i,
       .x_we_i,
       .x_rd_i,
+      .wbaddr_o
+      .gpr_we_o
+      .fpr_we_o
       .rvfi_issue_pointer_o,
       .rvfi_commit_pointer_o,
       .rollback_rd_o           (rollback_rd_i),
@@ -720,10 +726,10 @@ module issue_stage
       .x_transaction_rejected_o(x_transaction_rejected_o),
       .x_issue_writeback_o     (x_issue_writeback_iro_sb),
       .x_id_o                  (x_id_iro_sb),
-      .waddr_i,
-      .wdata_i,
-      .we_gpr_i,
-      .we_fpr_i,
+      .waddr_i                 (wbaddr_o),
+      .wdata_i                 (wbdata_i),
+      .we_gpr_i                (gpr_we_o),
+      .we_fpr_i                (fpr_we_o),
       .stall_issue_o,
       .rvfi_rs1_o              (rvfi_rs1_o),
       .rvfi_rs2_o              (rvfi_rs2_o)

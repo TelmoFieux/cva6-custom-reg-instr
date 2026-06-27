@@ -85,6 +85,13 @@ module scoreboard
     input logic x_we_i,
     // CVXIF destination register - ISSUE_STAGE
     input logic [4:0] x_rd_i,
+    // register address ex_stage data - ISSUE_READ_OPERANDS
+    output logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o,
+    // we enable for gpr regs - ISSUE_READ_OPERANDS
+    output logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o,
+    // we enable for fpr register - ISSUE_READ_OPERANDS
+    output logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o,
+
 
     // Issue pointer - RVFI
     output logic [ CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_issue_pointer_o,
@@ -247,6 +254,11 @@ module scoreboard
           mem_n[trans_id_i[i]].sbe.ex.cause = ex_i[i].cause;
         end
       end
+
+      //updating write info
+      wbaddr_o[i] = mem_q[trans_id_i[i]].sbe.rd;
+      gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wt_valid_i[i];
+      fpr_we_o[i] = is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wt_valid_i[i];
 
       if (wt_valid_i[i]) begin
         wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;

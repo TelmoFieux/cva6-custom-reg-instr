@@ -81,8 +81,14 @@ module register_allocation_table
 
       // Renaming destination
       if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
-        renamed_instr_o[i].old_phys = rat_q.rat[decoded_instr_i[i].rd];
-        renamed_instr_o[i].rd          = alloc_idx[i];
+        //check WAW hazard
+        if (i > 0 && we_i[i-1] && decoded_instr_ack_i[i-1] &&
+            decoded_instr_i[i].rd == decoded_instr_i[i-1].rd) begin
+            renamed_instr_o[i].old_phys = alloc_idx[i-1];
+        end else begin
+            renamed_instr_o[i].old_phys = rat_q.rat[decoded_instr_i[i].rd];
+        end
+        renamed_instr_o[i].rd = alloc_idx[i];
       end else begin
         renamed_instr_o[i].old_phys = decoded_instr_i[i].rd;
       end

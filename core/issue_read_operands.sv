@@ -113,14 +113,14 @@ module issue_read_operands
     output logic x_transaction_rejected_o,
     output logic x_issue_writeback_o,
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0] x_id_o,
-    // Destination register in the register file - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
-    // Value to write to register file - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_i,
-    // GPR write enable - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0] we_gpr_i,
-    // FPR write enable - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0] we_fpr_i,
+    // Destination register in the register file - SCOREBOARD
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
+    // Value to write to register file - SCOREBOARD
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_i,
+    // GPR write enable - SCOREBOARD
+    input logic [CVA6Cfg.NrWbPorts-1:0] we_gpr_i,
+    // FPR write enable - SCOREBOARD
+    input logic [CVA6Cfg.NrWbPorts-1:0] we_fpr_i,
     // Issue stall - PERF_COUNTERS
     output logic stall_issue_o,
     // Information dedicated to RVFI - RVFI
@@ -981,9 +981,9 @@ module issue_read_operands
   logic [  CVA6Cfg.NrRgprPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] raddr_pack;
 
   // pack signals
-  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_pack;
-  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_pack;
-  logic [CVA6Cfg.NrCommitPorts-1:0]                   we_pack;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_pack;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_pack;
+  logic [CVA6Cfg.NrWbPorts-1:0]                   we_pack;
 
   //adjust address to read from register file (when synchronous RAM is used reads take one cycle, so we advance the address)
   for (genvar i = 0; i <= CVA6Cfg.NrIssuePorts - 1; i++) begin
@@ -994,7 +994,7 @@ module issue_read_operands
     end
   end
 
-  for (genvar i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin : gen_write_back_port
+  for (genvar i = 0; i < CVA6Cfg.NrWbPorts; i++) begin : gen_write_back_port
     assign waddr_pack[i] = waddr_i[i];
     assign wdata_pack[i] = wdata_i[i];
     assign we_pack[i]    = we_gpr_i[i];
@@ -1041,17 +1041,17 @@ module issue_read_operands
 
   // pack signals
   logic [2:0][CVA6Cfg.RegAddrWidth-1:0] fp_raddr_pack;
-  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] fp_wdata_pack;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] fp_wdata_pack;
 
   always_comb begin : assign_fp_raddr_pack
     fp_raddr_pack = {
-      issue_instr_i[0].result[4:0], issue_instr_i[0].rs2[4:0], issue_instr_i[0].rs1[4:0]
+      issue_instr_i[0].result[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[0].rs2[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[0].rs1[CVA6Cfg.RegAddrWidth-1:0]
     };
 
     if (CVA6Cfg.SuperscalarEn) begin
       if (!(issue_instr_i[0].fu inside {FPU, FPU_VEC})) begin
         fp_raddr_pack = {
-          issue_instr_i[1].result[4:0], issue_instr_i[1].rs2[4:0], issue_instr_i[1].rs1[4:0]
+          issue_instr_i[1].result[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[1].rs2[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[1].rs1[CVA6Cfg.RegAddrWidth-1:0]
         };
       end
     end
@@ -1059,7 +1059,7 @@ module issue_read_operands
 
   generate
     if (CVA6Cfg.FpPresent) begin : float_regfile_gen
-      for (genvar i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin : gen_fp_wdata_pack
+      for (genvar i = 0; i < CVA6Cfg.NrWbPorts; i++) begin : gen_fp_wdata_pack
         assign fp_wdata_pack[i] = {wdata_i[i][CVA6Cfg.FLen-1:0]};
       end
       if (CVA6Cfg.FpgaEn) begin : gen_fpga_fp_regfile
