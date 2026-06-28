@@ -201,9 +201,11 @@ module issue_stage
 
   logic x_transaction_accepted_iro_sb, x_issue_writeback_iro_sb;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] x_id_iro_sb;
-  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o,
-  logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o,
-  logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o,
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o;
+  logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o;
+  logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o;
+
+  assign stall_issue_o = '0;
 
   // ---------------------------------------------------------
   // 1. Renaming instructions
@@ -510,7 +512,7 @@ module issue_stage
         .rm_i                   (rm_i),
         .rm_id_i                (rm_id_i),
         .wb_valid_i             (wt_valid_i),
-        .wb_rd_i                (waddr_i),
+        .wb_rd_i                (wbaddr_o),
         .wb_op_i                (wb_op_o),
         .rollback_id_i          (rollback_id_o),
         .rollback_en_i          (rollback_we_i),
@@ -640,8 +642,8 @@ module issue_stage
       .decoded_instr_ack_i     (decoded_instr_ack_o),
       .issue_instr_o           (),//j'ai enlevé cette valeur qui est drivé par les rs)
       .orig_instr_o            (orig_instr_sb_iro),
-      .issue_instr_valid_o     (issue_instr_ack),//aussi drivé par les rs
-      .issue_ack_i             (),
+      .issue_instr_valid_o     (issue_instr_ack),
+      .issue_ack_i             (issue_instr_ack),
       .fwd_o                   (fwd),
       .resolved_branch_i       (resolved_branch_i),
       .trans_id_i              (trans_id_i),
@@ -650,9 +652,9 @@ module issue_stage
       .wt_valid_i,
       .x_we_i,
       .x_rd_i,
-      .wbaddr_o
-      .gpr_we_o
-      .fpr_we_o
+      .wbaddr_o,
+      .gpr_we_o,
+      .fpr_we_o,
       .rvfi_issue_pointer_o,
       .rvfi_commit_pointer_o,
       .rollback_rd_o           (rollback_rd_i),
@@ -730,7 +732,6 @@ module issue_stage
       .wdata_i                 (wbdata_i),
       .we_gpr_i                (gpr_we_o),
       .we_fpr_i                (fpr_we_o),
-      .stall_issue_o,
       .rvfi_rs1_o              (rvfi_rs1_o),
       .rvfi_rs2_o              (rvfi_rs2_o)
   );
