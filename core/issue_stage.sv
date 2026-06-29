@@ -583,26 +583,28 @@ module issue_stage
   //1. issue port 2 cannot execute CSR or CVXIF operations
   //2. CSR instruction forbids issuing 2 instuction at the same time
 
-  if (tree_results[0].fu == CSR) begin
-    assign issue_instr_sb_iro[0] = tree_results[0];
-    assign issue_instr_sb_iro[1] = tree_results[1];
-    assign issue_instr_valid_sb_iro[0] = tree_valid[0];
-    assign issue_instr_valid_sb_iro[1] = 1'b0;
-  end else if (tree_results[1].fu == CSR) begin
-    assign issue_instr_sb_iro[0] = tree_results[1];
-    assign issue_instr_sb_iro[1] = tree_results[0];
-    assign issue_instr_valid_sb_iro[0] = tree_valid[1];
-    assign issue_instr_valid_sb_iro[1] = 1'b0;
-  end else if (tree_results[1].fu == CVXIF) begin
-    assign issue_instr_sb_iro[0] = tree_results[1];
-    assign issue_instr_sb_iro[1] = tree_results[0];
-    assign issue_instr_valid_sb_iro[0] = tree_valid[1];
-    assign issue_instr_valid_sb_iro[1] = tree_valid[0];
-  end else begin
-    assign issue_instr_sb_iro[0] = tree_results[0];
-    assign issue_instr_sb_iro[1] = tree_results[1];
-    assign issue_instr_valid_sb_iro[0] = tree_valid[0];
-    assign issue_instr_valid_sb_iro[1] = tree_valid[1];
+  always_comb begin : issue_valid
+    if (tree_results[0].fu == CSR) begin
+      issue_instr_sb_iro[0] = tree_results[0];
+      issue_instr_sb_iro[1] = tree_results[1];
+      issue_instr_valid_sb_iro[0] = tree_valid[0];
+      issue_instr_valid_sb_iro[1] = 1'b0;
+    end else if (tree_results[1].fu == CSR) begin
+      issue_instr_sb_iro[0] = tree_results[1];
+      issue_instr_sb_iro[1] = tree_results[0];
+      issue_instr_valid_sb_iro[0] = tree_valid[1];
+      issue_instr_valid_sb_iro[1] = 1'b0;
+    end else if (tree_results[1].fu == CVXIF) begin
+      issue_instr_sb_iro[0] = tree_results[1];
+      issue_instr_sb_iro[1] = tree_results[0];
+      issue_instr_valid_sb_iro[0] = tree_valid[1];
+      issue_instr_valid_sb_iro[1] = tree_valid[0];
+    end else begin
+      issue_instr_sb_iro[0] = tree_results[0];
+      issue_instr_sb_iro[1] = tree_results[1];
+      issue_instr_valid_sb_iro[0] = tree_valid[0];
+      issue_instr_valid_sb_iro[1] = tree_valid[1];
+    end
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
