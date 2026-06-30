@@ -543,7 +543,7 @@ module issue_stage
   end
 
   //if rs and scoreboard succesfully added the instr we validate the Handshake
-  assign decoded_instr_ack_o = issue_instr_ack & ~final_rs_full;
+  assign decoded_instr_ack_o = (issue_instr_ack & ~final_rs_full) && !flush_unissued_instr_i && !flush_i;
 
   logic [CVA6Cfg.NrIssuePorts:0][NR_WB-1:0]         tournament_valid_masked;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;

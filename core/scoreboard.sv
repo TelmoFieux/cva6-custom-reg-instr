@@ -331,7 +331,11 @@ module scoreboard
 
   always_comb begin : assign_issue_pointer_n
     issue_pointer_n = issue_pointer[num_issue];
-    if (flush_i) issue_pointer_n = '0;
+    if (flush_i) begin
+      issue_pointer_n = '0;
+    end else if (flush_unissued_instr_i && state_q == WALKBACK) begin
+      issue_pointer_n = bmiss_trans_id_q;
+    end
   end
 
   // precompute offsets for commit slots
@@ -376,8 +380,12 @@ module scoreboard
             bmiss_trans_id_n = after_flu_wb;
           end
           if (flush_unissued_instr_i && !flush_i) begin
-            state_n = WALKBACK;
-            rollback_pointer_n = issue_pointer[0]-1;
+            if (issue_pointer[0] == bmiss_trans_id_n) begin
+              state_n = NORMAL;
+            end else begin
+              state_n = WALKBACK;
+              rollback_pointer_n = issue_pointer[0] - 1;
+            end
           end
         end
         WALKBACK : begin
