@@ -71,6 +71,7 @@ module register_allocation_table
 
   // RAT of size nb register i.e 32 containing adress of physical register
   rat_table_t rat_n, rat_q;
+  logic raw_rs1, raw_rs2, raw_rs3;
 
   always_comb begin : renaming
     rat_n = rat_q;
@@ -95,13 +96,18 @@ module register_allocation_table
 
       // Renaming sources. In case of superscalar config, we check RAW hazard.
       // Current method only work up to 2 issue port
+
+      raw_rs1 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].rs1 == decoded_instr_i[i-1].rd);
+      raw_rs2 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].rs2 == decoded_instr_i[i-1].rd);
+
       renamed_instr_o[i].rs1 = (i == 0) ? rat_q.rat[decoded_instr_i[i].rs1] :
-        decoded_instr_i[i].rs1 != decoded_instr_i[i-1].rd ? rat_q.rat[decoded_instr_i[i].rs1] : alloc_idx[i-1];
+                               raw_rs1  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].rs1];
       renamed_instr_o[i].rs2 = (i == 0) ? rat_q.rat[decoded_instr_i[i].rs2] :
-        decoded_instr_i[i].rs2 != decoded_instr_i[i-1].rd ? rat_q.rat[decoded_instr_i[i].rs2] : alloc_idx[i-1];
+                               raw_rs2  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].rs2];
       if (NR_READ_PORTS == 3 && !decoded_instr_i[i].use_imm) begin
+        raw_rs3 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].result == decoded_instr_i[i-1].rd);
         renamed_instr_o[i].result = (i == 0) ? rat_q.rat[decoded_instr_i[i].result] :
-          decoded_instr_i[i].result != decoded_instr_i[i-1].rd ? rat_q.rat[decoded_instr_i[i].result] : alloc_idx[i-1];
+                                    raw_rs3  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].result];
       end
     end
 
@@ -128,13 +134,18 @@ module register_allocation_table
     end
 
     //rollback
-    if(rollback_we_i) begin
+    if (rollback_we_i && (FPR_RAT || rollback_rd_i != '0)) begin
       rat_n.free_regs[rat_n.rat[rollback_rd_i]] = 1'b1;
       rat_n.rat[rollback_rd_i] = rollback_old_phys_i;
     end
 
     if (rat_restore_en_i) begin
       rat_n = rat_restore_state_i;
+    end
+
+    // never rename r0 in gpr
+    if (!FPR_RAT) begin
+      rat_n.free_regs[0]=1'b0;
     end
   end
 

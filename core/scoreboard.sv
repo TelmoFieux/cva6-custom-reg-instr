@@ -109,8 +109,9 @@ module scoreboard
     // op of the instruction to rollback - ISSUE_STAGE
     output fu_op                                         rollback_op_o,
     // op of the instructions wrote back - ISSUE_STAGE
-    output fu_op [CVA6Cfg.NrWbPorts-1:0]                 wb_op_o
-
+    output fu_op [CVA6Cfg.NrWbPorts-1:0]                 wb_op_o,
+    // is writeback valid - ISSUE_STAGE
+    output logic [CVA6Cfg.NrWbPorts-1:0]                 wb_valid_o
 );
 
   // this is the FIFO struct of the issue queue
@@ -145,6 +146,7 @@ module scoreboard
   state_t state_n, state_q;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_pointer_n, rollback_pointer_q;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] bmiss_trans_id_n, bmiss_trans_id_q;
+  logic [CVA6Cfg.NrWbPorts-1:0] wb_valid_gated;
 
 
   for (genvar i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
@@ -224,6 +226,7 @@ module scoreboard
     // ------------
     // Write Back
     // ------------
+    assign wb_valid_o = wb_valid_gated;
     for (int unsigned i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
       // check if this instruction was issued (e.g.: it could happen after a flush that there is still
       // something in the pipeline e.g. an incomplete memory operation)
@@ -256,15 +259,12 @@ module scoreboard
       end
 
       //updating write info
-      wbaddr_o[i] = mem_q[trans_id_i[i]].sbe.rd;
-      gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wt_valid_i[i];
-      fpr_we_o[i] = is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wt_valid_i[i];
+      wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued;
 
-      if (wt_valid_i[i]) begin
-        wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;
-      end else begin
-        wb_op_o[i] = '0;
-      end
+      wbaddr_o[i] = mem_q[trans_id_i[i]].sbe.rd;
+      gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
+      fpr_we_o[i] =  is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
+      wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;
     end
 
     // ------------

@@ -404,6 +404,12 @@ module issue_read_operands
         tinst_n[i] = issue_instr_i[i].ex.tinst;
       end
 
+      // forwarding in case of dependance between two instr in the same cycle
+      for (int unsigned k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
+        if ((we_gpr_i[i] || we_fpr_i[i]) && waddr_i[k] == issue_instr_i[i].rs1) fu_data_n[i].operand_a = wdata_i[k];
+        if ((we_gpr_i[i] || we_fpr_i[i]) && waddr_i[k] == issue_instr_i[i].rs2) fu_data_n[i].operand_b = wdata_i[k];
+      end
+
       // use the PC as operand a
       if (issue_instr_i[i].use_pc) begin
         fu_data_n[i].operand_a = {

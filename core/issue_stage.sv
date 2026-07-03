@@ -407,6 +407,7 @@ module issue_stage
   localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
+  logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
 
   scoreboard_entry_t [NR_WB-1:0] rs_results;
   logic [NR_WB-1:0] rs_valid;
@@ -472,9 +473,11 @@ module issue_stage
         (fu == FPU_ALU2) ? (CVA6Cfg.FpPresent) :
         is_fpr_used(fu);
 
+      localparam logic en_lsu = fu == LOAD_STORE;
+
         for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
-        assign rm_i[j] = tree_valid[j];
-        assign rm_id_i[j] = tree_results[j].global_rs_id;
+          assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j];
+          assign rm_id_i[j] = issue_instr_sb_iro[j].global_rs_id;
       end
 
       case (fu)
@@ -503,6 +506,7 @@ module issue_stage
         .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
         .NR_RS_ENTRIES      (RS_SIZE),
         .FPR_ENABLED        (en_fpr),
+        .LSU_EN             (en_lsu),
         .scoreboard_entry_t (scoreboard_entry_t)
       ) i_reservation_station (
         .clk_i                  (clk_i),
@@ -511,7 +515,7 @@ module issue_stage
         .we_i                   (we_i),
         .rm_i                   (rm_i),
         .rm_id_i                (rm_id_i),
-        .wb_valid_i             (wt_valid_i),
+        .wb_valid_i             (wb_valid_o),
         .wb_rd_i                (wbaddr_o),
         .wb_op_i                (wb_op_o),
         .rollback_id_i          (rollback_id_o),
@@ -543,7 +547,7 @@ module issue_stage
   end
 
   //if rs and scoreboard succesfully added the instr we validate the Handshake
-  assign decoded_instr_ack_o = (issue_instr_ack & ~final_rs_full) && !flush_unissued_instr_i && !flush_i;
+  assign decoded_instr_ack_o = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack & ~final_rs_full) : '0;
 
   logic [CVA6Cfg.NrIssuePorts:0][NR_WB-1:0]         tournament_valid_masked;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
@@ -664,7 +668,8 @@ module issue_stage
       .rollback_old_phys_o     (rollback_old_phys_i),
       .rollback_op_o           (rollback_op_i),
       .rollback_we_o           (rollback_we_i),
-      .wb_op_o
+      .wb_op_o,
+      .wb_valid_o              (wb_valid_o)
   );
 
   // ---------------------------------------------------------
