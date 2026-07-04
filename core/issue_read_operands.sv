@@ -408,6 +408,9 @@ module issue_read_operands
       for (int unsigned k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
         if ((we_gpr_i[i] || we_fpr_i[i]) && waddr_i[k] == issue_instr_i[i].rs1) fu_data_n[i].operand_a = wdata_i[k];
         if ((we_gpr_i[i] || we_fpr_i[i]) && waddr_i[k] == issue_instr_i[i].rs2) fu_data_n[i].operand_b = wdata_i[k];
+        if (OPERANDS_PER_INSTR == 3 && !issue_instr_i[i].use_imm) begin
+          if ((we_gpr_i[i] || we_fpr_i[i]) && waddr_i[k] == issue_instr_i[i].result) fu_data_n[i].imm = wdata_i[k];
+        end
       end
 
       // use the PC as operand a

@@ -178,7 +178,12 @@ module issue_stage
   // ---------------------------------------------------
   // Scoreboard (SB) <-> Issue and Read Operands (IRO)
   // ---------------------------------------------------
-  typedef logic [(CVA6Cfg.NrRgprPorts == 3 ? CVA6Cfg.XLEN : CVA6Cfg.FLen)-1:0] rs3_len_t;
+
+  // In superscalar mode they are doubled so we divide it by two to get the number of operand max
+  // per instr
+  localparam int unsigned NR_READ_PORTS = CVA6Cfg.NrRgprPorts / 2;
+
+  typedef logic [(NR_READ_PORTS == 3 ? CVA6Cfg.XLEN : CVA6Cfg.FLen)-1:0] rs3_len_t;
   typedef struct packed {
     logic [CVA6Cfg.NR_SB_ENTRIES-1:0] still_issued;
     logic [CVA6Cfg.TRANS_ID_BITS-1:0] issue_pointer;
@@ -186,9 +191,6 @@ module issue_stage
     scoreboard_entry_t [CVA6Cfg.NR_SB_ENTRIES-1:0] sbe;
   } forwarding_t;
 
-  // In superscalar mode they are doubled so we divide it by two to get the number of operand max
-  // per instr
-  localparam int unsigned NR_READ_PORTS = CVA6Cfg.NrRgprPorts / 2;
 
   forwarding_t                                        fwd;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_sb_iro;
@@ -546,8 +548,6 @@ module issue_stage
     end
   end
 
-  //if rs and scoreboard succesfully added the instr we validate the Handshake
-  assign decoded_instr_ack_o = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack & ~final_rs_full) : '0;
 
   logic [CVA6Cfg.NrIssuePorts:0][NR_WB-1:0]         tournament_valid_masked;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
@@ -608,6 +608,14 @@ module issue_stage
       issue_instr_sb_iro[1] = tree_results[1];
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = tree_valid[1];
+    end
+  end
+
+  always_comb begin : instr_ack_update
+    //if rs and scoreboard succesfully added the instr we validate the Handshake
+    decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[0] && !final_rs_full[0]) : 1'b0;
+    for ( int unsigned i = 0 ; i < CVA6Cfg.NrIssuePorts ; i++) begin
+      decoded_instr_ack_o[1] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1]) : 1'b0;
     end
   end
 
