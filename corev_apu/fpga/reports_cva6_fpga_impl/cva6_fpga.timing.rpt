@@ -1,0 +1,265 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Thu Jul  2 14:47:11 2026
+| Host         : rayan-HP-ProBook-445-G8-Notebook-PC running 64-bit Ubuntu 24.04.1 LTS
+| Command      : report_timing -nworst 1 -delay_type max -sort_by group -file reports_cva6_fpga_impl/cva6_fpga.timing.rpt
+| Design       : cva6_zybo_z7_20
+| Device       : 7z020-clg400
+| Speed File   : -1  PRODUCTION 1.12 2019-11-22
+| Design State : Routed
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (MET) :             0.035ns  (required time - arrival time)
+  Source:                 i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/gen_inside_pipeline[0].mid_pipe_sum_q_reg[1][75]_bret_bret/C
+                            (rising edge-triggered cell FDPE clocked by clk_out1_xlnx_clk_gen  {rise@0.000ns fall@12.500ns period=25.000ns})
+  Destination:            i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][ex][cause][1]/D
+                            (rising edge-triggered cell FDCE clocked by clk_out1_xlnx_clk_gen  {rise@0.000ns fall@12.500ns period=25.000ns})
+  Path Group:             clk_out1_xlnx_clk_gen
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            25.000ns  (clk_out1_xlnx_clk_gen rise@25.000ns - clk_out1_xlnx_clk_gen rise@0.000ns)
+  Data Path Delay:        24.492ns  (logic 6.901ns (28.176%)  route 17.591ns (71.824%))
+  Logic Levels:           33  (CARRY4=10 LUT2=1 LUT3=2 LUT4=5 LUT5=4 LUT6=11)
+  Clock Path Skew:        -0.419ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    -1.674ns = ( 23.326 - 25.000 ) 
+    Source Clock Delay      (SCD):    -0.788ns
+    Clock Pessimism Removal (CPR):    0.467ns
+  Clock Uncertainty:      0.082ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.149ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out1_xlnx_clk_gen rise edge)
+                                                      0.000     0.000 r  
+    K17                                               0.000     0.000 r  clk_sys (IN)
+                         net (fo=0)                   0.000     0.000    i_xlnx_clk_gen/inst/clk_in1
+    K17                  IBUF (Prop_ibuf_I_O)         1.475     1.475 r  i_xlnx_clk_gen/inst/clkin1_ibufg/O
+                         net (fo=1, routed)           1.285     2.760    i_xlnx_clk_gen/inst/clk_in1_xlnx_clk_gen
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -7.759    -4.999 r  i_xlnx_clk_gen/inst/mmcm_adv_inst/CLKOUT0
+                         net (fo=1, routed)           2.206    -2.793    i_xlnx_clk_gen/inst/clk_out1_xlnx_clk_gen
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.101    -2.692 r  i_xlnx_clk_gen/inst/clkout1_buf/O
+                         net (fo=16818, routed)       1.904    -0.788    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/clk_out1
+    SLICE_X54Y102        FDPE                                         r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/gen_inside_pipeline[0].mid_pipe_sum_q_reg[1][75]_bret_bret/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X54Y102        FDPE (Prop_fdpe_C_Q)         0.518    -0.270 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/gen_inside_pipeline[0].mid_pipe_sum_q_reg[1][75]_bret_bret/Q
+                         net (fo=77, routed)          1.249     0.979    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/gen_inside_pipeline[0].mid_pipe_sum_q_reg[1][75]_bret_bret_n_0
+    SLICE_X51Y104        LUT4 (Prop_lut4_I1_O)        0.124     1.103 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_200/O
+                         net (fo=8, routed)           0.834     1.937    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mid_pipe_sum_q[0]_7[47]
+    SLICE_X55Y104        LUT4 (Prop_lut4_I3_O)        0.150     2.087 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_179/O
+                         net (fo=3, routed)           0.857     2.945    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_179_n_0
+    SLICE_X56Y103        LUT6 (Prop_lut6_I3_O)        0.326     3.271 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_153/O
+                         net (fo=12, routed)          0.645     3.916    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_153_n_0
+    SLICE_X58Y101        LUT3 (Prop_lut3_I0_O)        0.124     4.040 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_157/O
+                         net (fo=6, routed)           0.994     5.034    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_157_n_0
+    SLICE_X61Y101        LUT5 (Prop_lut5_I0_O)        0.152     5.186 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_97/O
+                         net (fo=8, routed)           0.690     5.876    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_97_n_0
+    SLICE_X60Y101        LUT4 (Prop_lut4_I2_O)        0.332     6.208 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_204/O
+                         net (fo=1, routed)           0.000     6.208    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_204_n_0
+    SLICE_X60Y101        CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.550     6.758 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][ex][cause][0]_bret__3_i_184/CO[3]
+                         net (fo=1, routed)           0.000     6.758    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][ex][cause][0]_bret__3_i_184_n_0
+    SLICE_X60Y102        CARRY4 (Prop_carry4_CI_CO[1])
+                                                      0.157     6.915 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][ex][cause][0]_bret__3_i_156/CO[1]
+                         net (fo=2, routed)           0.315     7.230    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][ex][cause][0]_bret__3_i_156_n_2
+    SLICE_X61Y102        LUT6 (Prop_lut6_I5_O)        0.329     7.559 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_96/O
+                         net (fo=20, routed)          0.223     7.783    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_96_n_0
+    SLICE_X61Y102        LUT6 (Prop_lut6_I3_O)        0.124     7.907 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_169/O
+                         net (fo=85, routed)          1.078     8.985    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_169_n_0
+    SLICE_X58Y106        LUT6 (Prop_lut6_I2_O)        0.124     9.109 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_126/O
+                         net (fo=4, routed)           0.804     9.913    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_126_n_0
+    SLICE_X62Y105        LUT6 (Prop_lut6_I1_O)        0.124    10.037 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_104/O
+                         net (fo=2, routed)           0.591    10.628    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_104_n_0
+    SLICE_X63Y104        LUT3 (Prop_lut3_I2_O)        0.124    10.752 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_60/O
+                         net (fo=10, routed)          1.277    12.029    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q[0][operand_b][31]_bret_bret__2_i_60_n_0
+    SLICE_X64Y103        LUT5 (Prop_lut5_I0_O)        0.152    12.181 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][21]_bret_i_18/O
+                         net (fo=19, routed)          0.858    13.039    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][21]_bret_i_18_n_0
+    SLICE_X64Y100        LUT5 (Prop_lut5_I2_O)        0.320    13.359 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_19/O
+                         net (fo=1, routed)           0.803    14.162    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_19_n_0
+    SLICE_X65Y101        LUT6 (Prop_lut6_I3_O)        0.326    14.488 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_8/O
+                         net (fo=40, routed)          0.841    15.329    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][0]_bret__3_i_8_n_0
+    SLICE_X59Y99         LUT2 (Prop_lut2_I0_O)        0.124    15.453 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][3]_bret_i_11/O
+                         net (fo=3, routed)           0.607    16.060    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/pre_round_abs[0]
+    SLICE_X59Y98         LUT6 (Prop_lut6_I4_O)        0.124    16.184 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][3]_bret_i_22/O
+                         net (fo=1, routed)           0.789    16.973    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][3]_bret_i_22_n_0
+    SLICE_X56Y94         LUT6 (Prop_lut6_I5_O)        0.124    17.097 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][3]_bret_i_15/O
+                         net (fo=1, routed)           0.000    17.097    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][result][3]_bret_i_15_n_0
+    SLICE_X56Y94         CARRY4 (Prop_carry4_S[0]_CO[3])
+                                                      0.532    17.629 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][3]_bret_i_8/CO[3]
+                         net (fo=1, routed)           0.000    17.629    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][3]_bret_i_8_n_0
+    SLICE_X56Y95         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114    17.743 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][7]_bret_i_9/CO[3]
+                         net (fo=1, routed)           0.000    17.743    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][7]_bret_i_9_n_0
+    SLICE_X56Y96         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114    17.857 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][11]_bret_i_6/CO[3]
+                         net (fo=1, routed)           0.000    17.857    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][11]_bret_i_6_n_0
+    SLICE_X56Y97         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114    17.971 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][15]_bret_i_6/CO[3]
+                         net (fo=1, routed)           0.000    17.971    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][15]_bret_i_6_n_0
+    SLICE_X56Y98         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114    18.085 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][19]_bret__3_i_6/CO[3]
+                         net (fo=1, routed)           0.000    18.085    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][19]_bret__3_i_6_n_0
+    SLICE_X56Y99         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114    18.199 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][21]_bret_i_8/CO[3]
+                         net (fo=1, routed)           0.001    18.200    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][21]_bret_i_8_n_0
+    SLICE_X56Y100        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114    18.314 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][27]_bret_i_10/CO[3]
+                         net (fo=1, routed)           0.000    18.314    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q_reg[0][sbe][result][27]_bret_i_10_n_0
+    SLICE_X56Y101        CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.334    18.648 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/fu_data_q_reg[0][operand_b][30]_bret_bret_bret__3_i_5/O[1]
+                         net (fo=3, routed)           0.829    19.477    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/rounded_abs[29]
+    SLICE_X55Y98         LUT4 (Prop_lut4_I0_O)        0.303    19.780 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_55/O
+                         net (fo=2, routed)           0.450    20.230    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_55_n_0
+    SLICE_X55Y99         LUT6 (Prop_lut6_I5_O)        0.124    20.354 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_62/O
+                         net (fo=1, routed)           0.402    20.756    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_62_n_0
+    SLICE_X55Y99         LUT5 (Prop_lut5_I3_O)        0.124    20.880 f  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_20/O
+                         net (fo=1, routed)           0.863    21.743    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_20_n_0
+    SLICE_X50Y94         LUT6 (Prop_lut6_I3_O)        0.124    21.867 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[0].i_opgroup_block/gen_parallel_slices[0].active_format.i_fmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fma/mem_q[0][sbe][ex][cause][1]_i_6/O
+                         net (fo=1, routed)           0.754    22.621    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[3].i_opgroup_block/gen_merged_slice.i_multifmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fpnew_cast_multi/gen_arbiter.data_nodes[1][status][UF]
+    SLICE_X40Y92         LUT6 (Prop_lut6_I5_O)        0.124    22.745 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[3].i_opgroup_block/gen_merged_slice.i_multifmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fpnew_cast_multi/mem_q[0][sbe][ex][cause][1]_i_2/O
+                         net (fo=4, routed)           0.835    23.580    i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[3].i_opgroup_block/gen_merged_slice.i_multifmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fpnew_cast_multi/gen_arbiter.gen_int_rr.rr_q_reg[0][0]
+    SLICE_X40Y82         LUT4 (Prop_lut4_I2_O)        0.124    23.704 r  i_ariane/i_cva6/ex_stage_i/fpu_gen.fpu_i/fpu_gen.i_fpnew_bulk/gen_operation_groups[3].i_opgroup_block/gen_merged_slice.i_multifmt_slice/gen_num_lanes[0].active_lane.lane_instance.i_fpnew_cast_multi/mem_q[0][sbe][ex][cause][1]_i_1/O
+                         net (fo=1, routed)           0.000    23.704    i_ariane/i_cva6/issue_stage_i/i_scoreboard/D[0]
+    SLICE_X40Y82         FDCE                                         r  i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][ex][cause][1]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out1_xlnx_clk_gen rise edge)
+                                                     25.000    25.000 r  
+    K17                                               0.000    25.000 r  clk_sys (IN)
+                         net (fo=0)                   0.000    25.000    i_xlnx_clk_gen/inst/clk_in1
+    K17                  IBUF (Prop_ibuf_I_O)         1.404    26.404 r  i_xlnx_clk_gen/inst/clkin1_ibufg/O
+                         net (fo=1, routed)           1.162    27.566    i_xlnx_clk_gen/inst/clk_in1_xlnx_clk_gen
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -7.814    19.752 r  i_xlnx_clk_gen/inst/mmcm_adv_inst/CLKOUT0
+                         net (fo=1, routed)           2.012    21.764    i_xlnx_clk_gen/inst/clk_out1_xlnx_clk_gen
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091    21.855 r  i_xlnx_clk_gen/inst/clkout1_buf/O
+                         net (fo=16818, routed)       1.471    23.326    i_ariane/i_cva6/issue_stage_i/i_scoreboard/clk_out1
+    SLICE_X40Y82         FDCE                                         r  i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][ex][cause][1]/C
+                         clock pessimism              0.467    23.792    
+                         clock uncertainty           -0.082    23.710    
+    SLICE_X40Y82         FDCE (Setup_fdce_C_D)        0.029    23.739    i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][ex][cause][1]
+  -------------------------------------------------------------------
+                         required time                         23.739    
+                         arrival time                         -23.704    
+  -------------------------------------------------------------------
+                         slack                                  0.035    
+
+Slack (MET) :             1.293ns  (required time - arrival time)
+  Source:                 i_dmi_jtag/i_dmi_jtag_tap/td_o_reg/C
+                            (falling edge-triggered cell FDCE clocked by tck  {rise@0.000ns fall@50.000ns period=100.000ns})
+  Destination:            tdo
+                            (output port clocked by tck  {rise@0.000ns fall@50.000ns period=100.000ns})
+  Path Group:             tck
+  Path Type:              Max at Slow Process Corner
+  Requirement:            20.000ns  (MaxDelay Path 20.000ns)
+  Data Path Delay:        6.094ns  (logic 4.015ns (65.896%)  route 2.078ns (34.105%))
+  Logic Levels:           1  (OBUF=1)
+  Output Delay:           5.000ns
+  Clock Path Skew:        -7.112ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.000ns
+    Source Clock Delay      (SCD):    7.112ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.501ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    1.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+  Timing Exception:       MaxDelay Path 20.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock tck fall edge)        0.000     0.000 f  
+    H15                                               0.000     0.000 f  tck (IN)
+                         net (fo=0)                   0.000     0.000    tck
+    H15                  IBUF (Prop_ibuf_I_O)         1.500     1.500 f  tck_IBUF_inst/O
+                         net (fo=1, routed)           3.648     5.148    tck_IBUF
+    BUFGCTRL_X0Y0        BUFG (Prop_bufg_I_O)         0.101     5.249 f  tck_IBUF_BUFG_inst/O
+                         net (fo=258, routed)         1.863     7.112    i_dmi_jtag/i_dmi_jtag_tap/tck_ni
+    SLICE_X109Y88        FDCE                                         r  i_dmi_jtag/i_dmi_jtag_tap/td_o_reg/C  (IS_INVERTED)
+  -------------------------------------------------------------------    -------------------
+    SLICE_X109Y88        FDCE (Prop_fdce_C_Q)         0.459     7.571 r  i_dmi_jtag/i_dmi_jtag_tap/td_o_reg/Q
+                         net (fo=1, routed)           2.078     9.649    tdo_OBUF
+    J15                  OBUF (Prop_obuf_I_O)         3.556    13.206 r  tdo_OBUF_inst/O
+                         net (fo=0)                   0.000    13.206    tdo
+    J15                                                               r  tdo (OUT)
+  -------------------------------------------------------------------    -------------------
+
+                         max delay                   20.000    20.000    
+                         clock pessimism              0.000    20.000    
+                         clock uncertainty           -0.501    19.499    
+                         output delay                -5.000    14.499    
+  -------------------------------------------------------------------
+                         required time                         14.499    
+                         arrival time                         -13.206    
+  -------------------------------------------------------------------
+                         slack                                  1.293    
+
+Slack (MET) :             21.454ns  (required time - arrival time)
+  Source:                 i_dm_top/i_dm_csrs/dmcontrol_q_reg[ndmreset]/C
+                            (rising edge-triggered cell FDCE clocked by clk_out1_xlnx_clk_gen  {rise@0.000ns fall@12.500ns period=25.000ns})
+  Destination:            i_rstgen_main/i_rstgen_bypass/synch_regs_q_reg[2]/CLR
+                            (recovery check against rising-edge clock clk_out1_xlnx_clk_gen  {rise@0.000ns fall@12.500ns period=25.000ns})
+  Path Group:             **async_default**
+  Path Type:              Recovery (Max at Slow Process Corner)
+  Requirement:            25.000ns  (clk_out1_xlnx_clk_gen rise@25.000ns - clk_out1_xlnx_clk_gen rise@0.000ns)
+  Data Path Delay:        3.021ns  (logic 0.580ns (19.202%)  route 2.441ns (80.798%))
+  Logic Levels:           1  (LUT2=1)
+  Clock Path Skew:        -0.038ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    -1.534ns = ( 23.466 - 25.000 ) 
+    Source Clock Delay      (SCD):    -0.891ns
+    Clock Pessimism Removal (CPR):    0.604ns
+  Clock Uncertainty:      0.082ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.149ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out1_xlnx_clk_gen rise edge)
+                                                      0.000     0.000 r  
+    K17                                               0.000     0.000 r  clk_sys (IN)
+                         net (fo=0)                   0.000     0.000    i_xlnx_clk_gen/inst/clk_in1
+    K17                  IBUF (Prop_ibuf_I_O)         1.475     1.475 r  i_xlnx_clk_gen/inst/clkin1_ibufg/O
+                         net (fo=1, routed)           1.285     2.760    i_xlnx_clk_gen/inst/clk_in1_xlnx_clk_gen
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -7.759    -4.999 r  i_xlnx_clk_gen/inst/mmcm_adv_inst/CLKOUT0
+                         net (fo=1, routed)           2.206    -2.793    i_xlnx_clk_gen/inst/clk_out1_xlnx_clk_gen
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.101    -2.692 r  i_xlnx_clk_gen/inst/clkout1_buf/O
+                         net (fo=16818, routed)       1.801    -0.891    i_dm_top/i_dm_csrs/clk_out1
+    SLICE_X101Y8         FDCE                                         r  i_dm_top/i_dm_csrs/dmcontrol_q_reg[ndmreset]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X101Y8         FDCE (Prop_fdce_C_Q)         0.456    -0.435 f  i_dm_top/i_dm_csrs/dmcontrol_q_reg[ndmreset]/Q
+                         net (fo=3, routed)           1.403     0.967    i_dm_top/i_dm_csrs/ndmreset
+    SLICE_X107Y15        LUT2 (Prop_lut2_I0_O)        0.124     1.091 f  i_dm_top/i_dm_csrs/synch_regs_q[3]_i_1/O
+                         net (fo=4, routed)           1.038     2.129    i_rstgen_main/i_rstgen_bypass/synch_regs_q_reg[3]_1
+    SLICE_X101Y22        FDCE                                         f  i_rstgen_main/i_rstgen_bypass/synch_regs_q_reg[2]/CLR
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out1_xlnx_clk_gen rise edge)
+                                                     25.000    25.000 r  
+    K17                                               0.000    25.000 r  clk_sys (IN)
+                         net (fo=0)                   0.000    25.000    i_xlnx_clk_gen/inst/clk_in1
+    K17                  IBUF (Prop_ibuf_I_O)         1.404    26.404 r  i_xlnx_clk_gen/inst/clkin1_ibufg/O
+                         net (fo=1, routed)           1.162    27.566    i_xlnx_clk_gen/inst/clk_in1_xlnx_clk_gen
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -7.814    19.752 r  i_xlnx_clk_gen/inst/mmcm_adv_inst/CLKOUT0
+                         net (fo=1, routed)           2.012    21.764    i_xlnx_clk_gen/inst/clk_out1_xlnx_clk_gen
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091    21.855 r  i_xlnx_clk_gen/inst/clkout1_buf/O
+                         net (fo=16818, routed)       1.611    23.466    i_rstgen_main/i_rstgen_bypass/clk_out1
+    SLICE_X101Y22        FDCE                                         r  i_rstgen_main/i_rstgen_bypass/synch_regs_q_reg[2]/C
+                         clock pessimism              0.604    24.071    
+                         clock uncertainty           -0.082    23.989    
+    SLICE_X101Y22        FDCE (Recov_fdce_C_CLR)     -0.405    23.584    i_rstgen_main/i_rstgen_bypass/synch_regs_q_reg[2]
+  -------------------------------------------------------------------
+                         required time                         23.584    
+                         arrival time                          -2.129    
+  -------------------------------------------------------------------
+                         slack                                 21.454    
+
+
+
+

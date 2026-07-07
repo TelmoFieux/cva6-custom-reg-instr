@@ -1,16 +1,20 @@
 // Copyright 2018 ETH Zurich and University of Bologna.
 // Copyright and related rights are licensed under the Solderpad Hardware
-// License, Version 0.51 (the "License"); you may not use this file except in
-// compliance with the License.  You may obtain a copy of the License at
-// http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law
+// License, Version 0.51 (the "License");
+// you may not use this file except in
+// compliance with the License.
+// You may obtain a copy of the License at
+// http://solderpad.org/licenses/SHL-0.51.
+// Unless required by applicable law
 // or agreed to in writing, software, hardware and materials distributed under
 // this License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the
 // specific language governing permissions and limitations under the License.
 //
 // Author: Florian Zaruba, ETH Zurich
 // Date: 16.05.2017
-// Description: Instruction Tracer Main Class
+// Description: Instruction Tracer Main Class (Modified for OoO Execution)
 
 `ifndef VERILATOR
 //pragma translate_off
@@ -20,59 +24,61 @@
 module instr_tracer #(
   parameter config_pkg::cva6_cfg_t CVA6Cfg = config_pkg::cva6_cfg_empty,
   parameter type bp_resolve_t = logic,
-  parameter type scoreboard_entry_t = logic[303:0], // Fix for xcelium bug at runtime: does not have enough memory space reserved for scoreboard_entry
+  parameter type scoreboard_entry_t = logic[303:0], 
   parameter type interrupts_t = logic,
   parameter type exception_t = logic,
   parameter interrupts_t INTERRUPTS = '0
 )(
-    input logic                    pck,
+  input logic                    pck,
   input logic                    rstn,
   input logic                    flush_unissued,
   input logic                    flush_all,
   input logic [31:0]             instruction,
   input logic                    fetch_valid,
   input logic                    fetch_ack,
-  input logic                    issue_ack, // issue acknowledged
-  input scoreboard_entry_t       issue_sbe, // issue scoreboard entry
-  input logic [1:0][CVA6Cfg.RegAddrWidth-1:0] waddr, // WB stage
+  input logic                    issue_ack, 
+  input scoreboard_entry_t       issue_sbe, 
+  input logic [1:0][CVA6Cfg.RegAddrWidth-1:0] waddr, 
   input logic [1:0][63:0]        wdata,
   input logic [1:0]              we_gpr,
   input logic [1:0]              we_fpr,
-  input scoreboard_entry_t [1:0] commit_instr, // commit instruction
+  input scoreboard_entry_t [1:0] commit_instr, 
   input logic [1:0]              commit_ack,
-  input logic                    st_valid,   // stores - address translation
+  
+  input logic                    st_valid,   
   input logic [CVA6Cfg.PLEN-1:0] st_paddr,
-  input logic                    ld_valid, // loads
+  input logic [CVA6Cfg.TRANS_ID_BITS-1:0] st_trans_id, // NEW: trans_id for stores
+
+  input logic                    ld_valid, 
   input logic                    ld_kill,
   input logic [CVA6Cfg.PLEN-1:0] ld_paddr,
-  input bp_resolve_t             resolve_branch, // misprediction
-  input exception_t              commit_exception,
-  input riscv::priv_lvl_t        priv_lvl, // current privilege level
-  input logic                    debug_mode,
+  input logic [CVA6Cfg.TRANS_ID_BITS-1:0] ld_trans_id, // NEW: trans_id for loads
+  
+  input bp_resolve_t             resolve_branch, 
+  input logic [CVA6Cfg.TRANS_ID_BITS-1:0] bp_trans_id, // NEW: trans_id for branches
 
-  input logic[CVA6Cfg.XLEN-1:0] hart_id_i
+  input exception_t              commit_exception,
+  input riscv::priv_lvl_t        priv_lvl, 
+  input logic                    debug_mode,
+  input logic[CVA6Cfg.XLEN-1:0]  hart_id_i
 );
 
-  // keep the decoded instructions in a queue
+  // keep the decoded instructions in a queue (Fetch is still in-order)
   logic [31:0] decode_queue [$];
-  // keep the issued instructions in a queue
-  logic [31:0] issue_queue [$];
-  // issue scoreboard entries
-  scoreboard_entry_t issue_sbe_queue [$];
-  scoreboard_entry_t issue_sbe_item;
-  // store resolved branches, get (mis-)predictions
-  bp_resolve_t bp [$];
+
+  // Inflight Data Structures (Indexed by trans_id to support OoO)
+  logic [31:0]             inflight_instr [int];
+  scoreboard_entry_t       inflight_sbe   [int];
+  logic [CVA6Cfg.PLEN-1:0] inflight_paddr [int];
+  bp_resolve_t             inflight_bp    [int];
+
   // shadow copy of the register files
   logic [63:0] gp_reg_file [2 ** CVA6Cfg.RegAddrWidth];
   logic [63:0] fp_reg_file [2 ** CVA6Cfg.RegAddrWidth];
+
   // 64 bit clock tick count
   longint unsigned clk_ticks;
   int f, commit_log;
-  // address mapping
-  // contains mappings of the form vaddr <-> paddr
-  logic [63:0] store_mapping[$], load_mapping[$], address_mapping;
-
-  // static uvm_cmdline_processor uvcl = uvm_cmdline_processor::get_inst();
 
   function void create_file(logic [63:0] hart_id);
     string fn, fn_commit_log;
@@ -87,77 +93,80 @@ module instr_tracer #(
   task trace();
     automatic logic [31:0] decode_instruction, issue_instruction, issue_commit_instruction;
     automatic scoreboard_entry_t commit_instruction;
+    automatic logic [CVA6Cfg.PLEN-1:0] address_mapping;
+
     // initialize register 0
     gp_reg_file  = '{default:0};
     fp_reg_file  = '{default:0};
 
     forever begin
       automatic bp_resolve_t bp_instruction = '0;
+
       // new cycle, we are only interested if reset is de-asserted
       @(pck) if (rstn !== 1'b1) begin
         flush();
         continue;
       end
 
-      // increment clock tick
       clk_ticks++;
 
       // -------------------
       // Instruction Decode
       // -------------------
-      // we are decoding an instruction
       if (fetch_valid && fetch_ack) begin
         decode_instruction = instruction;
         decode_queue.push_back(decode_instruction);
       end
+
       // -------------------
       // Instruction Issue
       // -------------------
-      // we got a new issue ack, so put the element from the decode queue to
-      // the issue queue
       if (issue_ack && !flush_unissued) begin
         issue_instruction = decode_queue.pop_front();
-        issue_queue.push_back(issue_instruction);
-        // also save the scoreboard entry to a separate issue queue
-        issue_sbe_queue.push_back(scoreboard_entry_t'(issue_sbe));
+        // Save using the transaction ID instead of pushing to a FIFO
+        inflight_instr[int'(issue_sbe.trans_id)] = issue_instruction;
+        inflight_sbe[int'(issue_sbe.trans_id)]   = scoreboard_entry_t'(issue_sbe);
       end
 
       // --------------------
-      // Address Translation
+      // Address Translation (Out of Order)
       // --------------------
       if (st_valid) begin
-        store_mapping.push_back(st_paddr);
+        inflight_paddr[int'(st_trans_id)] = st_paddr;
       end
 
       if (ld_valid && !ld_kill) begin
-        load_mapping.push_back(ld_paddr);
+        inflight_paddr[int'(ld_trans_id)] = ld_paddr;
       end
+
       // ----------------------
-      // Store predictions
+      // Store predictions (Out of Order)
       // ----------------------
       if (resolve_branch.valid) begin
-        bp.push_back(resolve_branch);
+        inflight_bp[int'(bp_trans_id)] = resolve_branch;
       end
+
       // --------------
-      //  Commit
+      //  Commit (In Order)
       // --------------
-      // we are committing an instruction
       for (int i = 0; i < 2; i++) begin
         if (commit_ack[i]) begin
+          int tid = int'(commit_instr[i].trans_id);
           commit_instruction = scoreboard_entry_t'(commit_instr[i]);
-          issue_commit_instruction = issue_queue.pop_front();
-          issue_sbe_item = issue_sbe_queue.pop_front();
-          // check if the instruction retiring is a load or store, get the physical address accordingly
-          if (commit_instr[i].fu == ariane_pkg::LOAD)
-            address_mapping = load_mapping.pop_front();
-          else if (commit_instr[i].fu == ariane_pkg::STORE)
-            address_mapping = store_mapping.pop_front();
+          
+          // Retrieve data dynamically based on trans_id
+          issue_commit_instruction = inflight_instr.exists(tid) ? inflight_instr[tid] : '0;
+          issue_sbe_item = inflight_sbe.exists(tid) ? inflight_sbe[tid] : '0;
+          
+          address_mapping = '0;
+          if (commit_instr[i].fu == ariane_pkg::LOAD || commit_instr[i].fu == ariane_pkg::STORE) begin
+             address_mapping = inflight_paddr.exists(tid) ? inflight_paddr[tid] : '0;
+          end
 
-          if (commit_instr[i].fu == ariane_pkg::CTRL_FLOW)
-            bp_instruction = bp.pop_front();
-          // the scoreboards issue entry still contains the immediate value as a result
-          // check if the write back is valid, if not we need to source the result from the register file
-          // as the most recent version of this register will be there.
+          if (commit_instr[i].fu == ariane_pkg::CTRL_FLOW) begin
+             bp_instruction = inflight_bp.exists(tid) ? inflight_bp[tid] : '0;
+          end
+
           if (we_gpr[i] || we_fpr[i]) begin
             printInstr(issue_sbe_item, issue_commit_instruction, wdata[i], address_mapping, priv_lvl, debug_mode, bp_instruction);
           end else if (ariane_pkg::is_rd_fpr(commit_instruction.op)) begin
@@ -165,19 +174,25 @@ module instr_tracer #(
           end else begin
             printInstr(issue_sbe_item, issue_commit_instruction, gp_reg_file[commit_instruction.rd], address_mapping, priv_lvl, debug_mode, bp_instruction);
           end
+
+          // Clean up the dictionary entries
+          inflight_instr.delete(tid);
+          inflight_sbe.delete(tid);
+          inflight_paddr.delete(tid);
+          inflight_bp.delete(tid);
         end
       end
+
       // --------------
       // Exceptions
       // --------------
       if (commit_exception.valid && !(debug_mode && commit_exception.cause == riscv::BREAKPOINT)) begin
-        // print exception
         printException(commit_instr[0].pc, commit_exception.cause, commit_exception.tval);
       end
+
       // ----------------------
       // Commit Registers
       // ----------------------
-      // update shadow reg files here
       for (int i = 0; i < 2; i++) begin
         if (we_gpr[i] && waddr[i] != '0) begin
           gp_reg_file[waddr[i]] = wdata[i];
@@ -185,40 +200,33 @@ module instr_tracer #(
           fp_reg_file[waddr[i]] = wdata[i];
         end
       end
+
       // --------------
       // Flush Signals
       // --------------
-      // flush un-issued instructions
       if (flush_unissued) begin
         flushDecode();
       end
-      // flush whole pipeline
+      
       if (flush_all) begin
         flush();
       end
     end
-
   endtask
 
-  // flush all decoded instructions
   function void flushDecode ();
     decode_queue = {};
   endfunction
 
-  // flush everything, we took an exception/interrupt
   function void flush ();
     flushDecode();
-    // clear all elements in the queue
-    issue_queue     = {};
-    issue_sbe_queue = {};
-    // also clear mappings
-    store_mapping   = {};
-    load_mapping    = {};
-    bp              = {};
+    inflight_instr.delete();
+    inflight_sbe.delete();
+    inflight_paddr.delete();
+    inflight_bp.delete();
   endfunction
 
   function automatic void printInstr(scoreboard_entry_t sbe, logic [31:0] instr, logic [63:0] result, logic [CVA6Cfg.PLEN-1:0] paddr, riscv::priv_lvl_t priv_lvl, logic debug_mode, bp_resolve_t bp);
-    // 1. Toutes les déclarations de variables impérativement en haut
     instr_trace_item #(
       .CVA6Cfg(CVA6Cfg),
       .bp_resolve_t(bp_resolve_t),
@@ -226,18 +234,15 @@ module instr_tracer #(
     ) iti;
     string print_instr;
 
-    // 2. Code exécutable et affectations ensuite
     iti = new ($time, clk_ticks, sbe, instr, gp_reg_file, fp_reg_file, result, paddr, priv_lvl, debug_mode, bp);
-    // print instruction to console
     print_instr = iti.printInstr();
     if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && !debug_mode) begin
-      $fwrite(commit_log, riscv::spikeCommitLog(sbe.pc, priv_lvl, instr, sbe.rd, result, ariane_pkg::is_rd_fpr(sbe.op)));
+      $fwrite(commit_log, riscv::spikeCommitLog(sbe.pc, priv_lvl, instr, sbe.arch_rd, result, ariane_pkg::is_rd_fpr(sbe.op)));
     end
     $fwrite(f, {print_instr, "\n"});
   endfunction
 
   function automatic void printException(logic [CVA6Cfg.VLEN-1:0] pc, logic [63:0] cause, logic [63:0] tval);
-    // 1. Toutes les déclarations de variables impérativement en haut
     ex_trace_item #(
       .CVA6Cfg(CVA6Cfg),
       .interrupts_t(interrupts_t),
@@ -245,7 +250,6 @@ module instr_tracer #(
     ) eti;
     string print_ex;
 
-    // 2. Code exécutable et affectations ensuite
     eti = new (pc, cause, tval);
     print_ex = eti.printException();
     $fwrite(f, {print_ex, "\n"});
@@ -255,7 +259,6 @@ module instr_tracer #(
     if (f) $fclose(f);
     if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && commit_log) $fclose(commit_log);
   endfunction
-
 
   initial begin
     #15ns;
