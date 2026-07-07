@@ -407,7 +407,7 @@ module issue_stage
 
   localparam int unsigned NR_WB = 5;
   // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  localparam int unsigned RS_SIZE = 2;
+  localparam int unsigned RS_SIZE = 4;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -587,6 +587,7 @@ module issue_stage
   //Finally we reorder instruction for 2 reasons
   //1. issue port 2 cannot execute CSR or CVXIF operations
   //2. CSR instruction forbids issuing 2 instuction at the same time
+  // and it must be issued strictly in order
 
   always_comb begin : issue_valid
     if (tree_results[0].fu == CSR || tree_results[1].fu == CSR) begin
