@@ -406,7 +406,8 @@ module issue_stage
   // ---------------------------------------------------------
 
   localparam int unsigned NR_WB = 5;
-  localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
+  // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
+  localparam int unsigned RS_SIZE = 2;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -588,15 +589,10 @@ module issue_stage
   //2. CSR instruction forbids issuing 2 instuction at the same time
 
   always_comb begin : issue_valid
-    if (tree_results[0].fu == CSR) begin
+    if (tree_results[0].fu == CSR || tree_results[1].fu == CSR) begin
       issue_instr_sb_iro[0] = tree_results[0];
-      issue_instr_sb_iro[1] = tree_results[1];
+      issue_instr_sb_iro[1] = '0;
       issue_instr_valid_sb_iro[0] = tree_valid[0];
-      issue_instr_valid_sb_iro[1] = 1'b0;
-    end else if (tree_results[1].fu == CSR) begin
-      issue_instr_sb_iro[0] = tree_results[1];
-      issue_instr_sb_iro[1] = tree_results[0];
-      issue_instr_valid_sb_iro[0] = tree_valid[1];
       issue_instr_valid_sb_iro[1] = 1'b0;
     end else if (tree_results[1].fu == CVXIF) begin
       issue_instr_sb_iro[0] = tree_results[1];
@@ -614,8 +610,8 @@ module issue_stage
   always_comb begin : instr_ack_update
     //if rs and scoreboard succesfully added the instr we validate the Handshake
     decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[0] && !final_rs_full[0]) : 1'b0;
-    for ( int unsigned i = 0 ; i < CVA6Cfg.NrIssuePorts ; i++) begin
-      decoded_instr_ack_o[1] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1]) : 1'b0;
+    for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
+      decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1]) : 1'b0;
     end
   end
 

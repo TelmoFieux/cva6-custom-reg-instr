@@ -116,11 +116,13 @@ module register_allocation_table
       rat_n.free_regs = free_regs_masked[CVA6Cfg.NrIssuePorts];
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
         if (commit_valid_i[i] && ((is_rd_fpr(commit_op_i) && FPR_RAT==1'b1) || (!is_rd_fpr(commit_op_i) && FPR_RAT==1'b0))) begin
-          rat_n.free_regs[commit_old_phys_i[i]] = 1'b1; //freeing old reg
-          //locking new reg. Useless for issue rat but necessary for commit rat
-          rat_n.free_regs[commit_new_phys_i[i]] = 1'b0;
-          if (COMMIT_RAT == 1'b1 && commit_rd_i[i] != '0) begin
-            rat_n.rat[commit_rd_i[i]] = commit_new_phys_i[i];
+          if (FPR_RAT || commit_rd_i[i] != '0) begin
+            rat_n.free_regs[commit_old_phys_i[i]] = 1'b1; //freeing old reg
+            rat_n.free_regs[commit_new_phys_i[i]] = 1'b0; //locking new reg
+
+            if (COMMIT_RAT == 1'b1) begin
+              rat_n.rat[commit_rd_i[i]] = commit_new_phys_i[i];
+            end
           end
         end
 

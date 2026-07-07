@@ -102,13 +102,13 @@ module reservation_station
   logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] forwarding_updated_regs;
 
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
+    // lsu instr must be strictly issued in order so we label all of them as valid
+    // to ensure the tournament_tree output de oldest one
     if (LSU_EN) begin
-      assign tournament_valid[i] = lsu_used_q ? 1'b0 : rs_q.free_entries[i] == 1'b0 ?
-          (rs_q.valid_regs[i] == '1 ? 1'b1 : 1'b0)
-        : 1'b0;
+      assign tournament_valid[i] = (rs_q.free_entries[i] == 1'b0);
     end else begin
       assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ?
-        (rs_q.valid_regs[i] == '1 ? 1'b1 : 1'b0)
+        (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR ? 1'b1 : 1'b0)
       : 1'b0;
     end
     assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
@@ -129,8 +129,18 @@ module reservation_station
       .winner_valid_o (winner_valid_o)
   );
 
+  if (LSU_EN) begin
+    // now that we have the oldest one we check it's validity
+    assign decoded_instr_valid_o = lsu_used_q ? 1'b0 : rs_q.free_entries[winner_o] == 1'b0 ?
+        (rs_q.valid_regs[winner_o] == '1 ? 1'b1 : 1'b0)
+      : 1'b0;
+  end else begin
+    assign decoded_instr_valid_o = rs_q.rs_table[winner_o].fu == CSR ?
+        (winner_valid_o && rs_q.valid_regs[winner_o] == '1)
+      : winner_valid_o ;
+  end
+
   assign decoded_instr_o = rs_q.rs_table[winner_o];
-  assign decoded_instr_valid_o = winner_valid_o;
 
   always_comb begin : updating_rs
     logic allocated_by_p0;
@@ -209,10 +219,10 @@ module reservation_station
       //First we check RAW hazard between the 2 newly fetched instr
       if (decoded_instr_ack_i == '1) begin
         if (!FPR_ENABLED) begin
-          RAW_updated_regs[i][0] = (decoded_instr_i[1].rs1 == decoded_instr_i[0].rd) ? 1'b0 : 1'b1;
-          RAW_updated_regs[i][1] = (decoded_instr_i[1].rs2 == decoded_instr_i[0].rd) ? 1'b0 : 1'b1;
+          RAW_updated_regs[i][0] = (decoded_instr_i[1].rs1 == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
+          RAW_updated_regs[i][1] = (decoded_instr_i[1].rs2 == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
           if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-            RAW_updated_regs[i][2] = (decoded_instr_i[1].result == decoded_instr_i[0].rd) ? 1'b0 : 1'b1;
+            RAW_updated_regs[i][2] = (decoded_instr_i[1].result == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
           end
         end else begin
           RAW_updated_regs[i][0] = is_rd_fpr(decoded_instr_i[0].op) && is_rs1_fpr(decoded_instr_i[1].op) && decoded_instr_i[1].rs1 == decoded_instr_i[0].rd ? 1'b0 : 1'b1;
@@ -380,10 +390,6 @@ module reservation_station
     end
 
     is_result_available_gpr_n[0] = '1;
-    if (FPR_ENABLED) begin
-      is_result_available_fpr_n[0] = '1;
-    end
-
 
     if (rs_restore_en_i) begin
       rs_n.free_entries = '1;

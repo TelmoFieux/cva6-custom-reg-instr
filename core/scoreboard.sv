@@ -333,7 +333,7 @@ module scoreboard
     issue_pointer_n = issue_pointer[num_issue];
     if (flush_i) begin
       issue_pointer_n = '0;
-    end else if (flush_unissued_instr_i && state_q == WALKBACK) begin
+    end else if (rollback_pointer_q == bmiss_trans_id_q && state_q == WALKBACK) begin
       issue_pointer_n = bmiss_trans_id_q;
     end
   end

@@ -95,7 +95,9 @@ CFLAGS  ?=	-march=rv32im_zicsr \
 		-falign-functions=16 \
 		-static \
 		-Wall \
-		-pedantic
+		-pedantic \
+		-Wno-error=int-conversion \
+		-Wno-error=incompatible-pointer-types
 
 RISCV_CFLAGS :=-DPERFORMANCE_RUN=1 \
 		-DITERATIONS=3 \
@@ -113,7 +115,9 @@ RISCV_CFLAGS :=-DPERFORMANCE_RUN=1 \
 		-falign-functions=16 \
 		-static \
 		-Wall \
-		-pedantic
+		-pedantic \
+		-Wno-error=int-conversion \
+		-Wno-error=incompatible-pointer-types
 
 
 RISCV_LDFLAGS=-L./ -lcva6 -static -nostartfiles -T $(src_dir)/../bsp/config/link.ld
