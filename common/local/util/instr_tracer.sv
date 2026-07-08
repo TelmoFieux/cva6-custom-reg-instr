@@ -93,6 +93,7 @@ module instr_tracer #(
   task trace();
     automatic logic [31:0] decode_instruction, issue_instruction, issue_commit_instruction;
     automatic scoreboard_entry_t commit_instruction;
+    automatic scoreboard_entry_t issue_sbe_item;
     automatic logic [CVA6Cfg.PLEN-1:0] address_mapping;
 
     // initialize register 0
@@ -151,7 +152,7 @@ module instr_tracer #(
       // --------------
       for (int i = 0; i < 2; i++) begin
         if (commit_ack[i]) begin
-          int tid = int'(commit_instr[i].trans_id);
+          automatic int tid = int'(commit_instr[i].trans_id);
           commit_instruction = scoreboard_entry_t'(commit_instr[i]);
           
           // Retrieve data dynamically based on trans_id
