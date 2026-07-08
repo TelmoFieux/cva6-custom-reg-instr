@@ -106,12 +106,14 @@ module controller
     // ------------
     // Mis-predict
     // ------------
-    // flush on mispredict. Maintain flush mode while rollback is active
-    if (resolved_branch_i.is_mispredict || rollback_en_i) begin
-      // flush only un-issued instructions
-      flush_unissued_instr_o = 1'b1;
-      // and if stage
+    // flush on mispredict
+    if (resolved_branch_i.is_mispredict) begin
       flush_if_o             = 1'b1;
+    end
+
+    // maintain backend flush while rollback is active
+    if (resolved_branch_i.is_mispredict || rollback_en_i) begin
+      flush_unissued_instr_o = 1'b1;
     end
 
     // ---------------------------------

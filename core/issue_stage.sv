@@ -219,6 +219,7 @@ module issue_stage
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] renamed_instr_i;
   rat_table_t                                   gpr_commit_rat, fpr_commit_rat;
   logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_i;
+  logic [31:0]                                  rollback_arch_rd_i;
   logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_i;
   logic                                         rollback_we_i;
   fu_op                                         rollback_op_i;
@@ -261,7 +262,7 @@ module issue_stage
         .commit_new_phys_i       (commit_new_phys_i),
         .commit_rd_i             (commit_rd_i),
         .commit_op_i             (commit_op_i),
-        .rollback_rd_i           (rollback_rd_i),
+        .rollback_rd_i           (rollback_arch_rd_i),
         .rollback_old_phys_i     (rollback_old_phys_i),
         .rollback_we_i           (gpr_rollback_we_i),
         .decoded_instr_i         (decoded_instr_i),
@@ -289,7 +290,7 @@ module issue_stage
         .commit_new_phys_i       (commit_new_phys_i),
         .commit_rd_i             (commit_rd_i),
         .commit_op_i             (commit_op_i),
-        .rollback_rd_i           (rollback_rd_i),
+        .rollback_rd_i           (rollback_arch_rd_i),
         .rollback_old_phys_i     (rollback_old_phys_i),
         .rollback_we_i           (1'b0),
         .decoded_instr_i         (decoded_instr_i),
@@ -333,7 +334,7 @@ module issue_stage
           .commit_new_phys_i       (commit_new_phys_i),
           .commit_rd_i             (commit_rd_i),
           .commit_op_i             (commit_op_i),
-          .rollback_rd_i           (rollback_rd_i),
+          .rollback_rd_i           (rollback_arch_rd_i),
           .rollback_old_phys_i     (rollback_old_phys_i),
           .rollback_we_i           (fpr_rollback_we_i),
           .decoded_instr_i         (decoded_instr_i),
@@ -362,7 +363,7 @@ module issue_stage
           .commit_new_phys_i       (commit_new_phys_i),
           .commit_rd_i             (commit_rd_i),
           .commit_op_i             (commit_op_i),
-          .rollback_rd_i           (rollback_rd_i),
+          .rollback_rd_i           (rollback_arch_rd_i),
           .rollback_old_phys_i     (rollback_old_phys_i),
           .rollback_we_i           (1'b0),
           .decoded_instr_i         (decoded_instr_i),
@@ -407,7 +408,7 @@ module issue_stage
 
   localparam int unsigned NR_WB = 5;
   // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  localparam int unsigned RS_SIZE = 4;
+  localparam int unsigned RS_SIZE = 8;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -446,21 +447,28 @@ module issue_stage
             assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_we_i;
 
           FLU :
-            assign we_i[j] = (((decoded_instr_i[0].fu == ALU || decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
-                  && decoded_instr_i[1].fu == ALU) ?
-                  ((j == 0) ? 1'b1 : 1'b0) :
-              decoded_instr_i[j].fu == ALU
-              || decoded_instr_i[j].fu == CSR || decoded_instr_i[j].fu == MULT
-              || decoded_instr_i[j].fu == CTRL_FLOW || decoded_instr_i[j].fu == NONE) && !rollback_we_i;
+            assign we_i[j] =(((decoded_instr_i[1].fu == ALU || decoded_instr_i[1].fu == CSR || decoded_instr_i[1].fu == MULT || decoded_instr_i[1].fu == CTRL_FLOW)
+                      && decoded_instr_i[0].fu == ALU) ?
+                          ((j == 1) ? 1'b1 : 1'b0) :
+                      ((decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
+                          && decoded_instr_i[1].fu == ALU) ?
+                          ((j == 0) ? 1'b1 : 1'b0) :
+                      decoded_instr_i[j].fu == ALU
+                      || decoded_instr_i[j].fu == CSR || decoded_instr_i[j].fu == MULT
+                      || decoded_instr_i[j].fu == CTRL_FLOW || decoded_instr_i[j].fu == NONE) && !rollback_we_i;
 
           // Since ALU2 and FPU share the same Wb port we only write instr to this rs if
           // it is an fpu instr or it is an alu instruction and we already wrote one flu instr in
-          // the flu RS. That way we can try to dipacth as most as possible 2 instr to each alu when
+          // the flu RS. That way we can try to dipacth as much as possible 2 instr to each alu when
           // possible
           FPU_ALU2 :
-            assign we_i[j] = (((decoded_instr_i[0].fu == ALU || decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
-            && decoded_instr_i[1].fu == ALU ) ?
-            ((j == 1) ? 1'b1 : 1'b0) : decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_we_i;
+            assign we_i[j] = (((decoded_instr_i[1].fu == ALU || decoded_instr_i[1].fu == CSR || decoded_instr_i[1].fu == MULT || decoded_instr_i[1].fu == CTRL_FLOW)
+                      && decoded_instr_i[0].fu == ALU) ?
+                          ((j == 0) ? 1'b1 : 1'b0) :
+                      ((decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
+                          && decoded_instr_i[1].fu == ALU) ?
+                          ((j == 1) ? 1'b1 : 1'b0) :
+                      decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_we_i;
 
           F_CVXIF :
             assign we_i[j] = decoded_instr_i[j].fu == CVXIF && !rollback_we_i;
@@ -523,6 +531,8 @@ module issue_stage
         .wb_op_i                (wb_op_o),
         .rollback_id_i          (rollback_id_o),
         .rollback_en_i          (rollback_we_i),
+        .rollback_op_i          (rollback_op_i),
+        .rollback_rd_i          (rollback_rd_i),
         .rs_restore_en_i        (flush_i),
         .decoded_instr_i        (renamed_instr_i),
         .decoded_instr_ack_i    (decoded_instr_ack_o),
@@ -673,6 +683,7 @@ module issue_stage
       .rollback_old_phys_o     (rollback_old_phys_i),
       .rollback_op_o           (rollback_op_i),
       .rollback_we_o           (rollback_we_i),
+      .rollback_arch_rd_o      (rollback_arch_rd_i),
       .wb_op_o,
       .wb_valid_o              (wb_valid_o)
   );

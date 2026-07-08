@@ -45,6 +45,8 @@ module reservation_station
     input  fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
     input  logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           rollback_id_i, // id of the entry to rollback
     input  logic                                                         rollback_en_i, // is rollback enabled
+    input  logic [ADDR_WIDTH-1:0]                                        rollback_rd_i, // architectural register to rollback
+    input  fu_op                                                         rollback_op_i, // architectural register to rollback
     input  logic                                                         rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
@@ -143,7 +145,7 @@ module reservation_station
 
   if (LSU_EN) begin
     // now that we have the oldest one we check it's validity
-    assign decoded_instr_valid_o = lsu_used_q ? 1'b0 : rs_q.free_entries[winner_o] == 1'b0 ?
+    assign decoded_instr_valid_o = (lsu_used_q && !wb_valid_i[STORE_WB] && !wb_valid_i[LOAD_WB]) ? 1'b0 : rs_q.free_entries[winner_o] == 1'b0 ?
         (rs_q.valid_regs[winner_o] == '1 ? 1'b1 : 1'b0)
       : 1'b0;
   end else begin
@@ -206,25 +208,44 @@ module reservation_station
       end
     end
 
+    // updating dependencies during rollback
+    if (rollback_en_i) begin
+      if (FPR_ENABLED) begin
+        if (is_rd_fpr(rollback_op_i)) begin
+          is_result_available_fpr_n[rollback_rd_i] = 1'b1;
+        end else begin
+          is_result_available_gpr_n[rollback_rd_i] = 1'b1;
+        end
+      end else begin
+        is_result_available_gpr_n[rollback_rd_i] = 1'b1;
+      end
+    end
+
     RAW_updated_regs = rs_q.valid_regs;
     updated_regs = rs_q.valid_regs;
     forwarding_updated_regs = '0;
 
     //removing instr after it was selected to be executed
     //or because of rollback triggered by exception or branch miss.
-    //but in both case it is the same mechanism so we use the same signal
     rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
       allocated_by_p0 = (CVA6Cfg.NrIssuePorts > 0) && (i == alloc_idx[0]) && we_i[0] && decoded_instr_ack_i[0] && empty_mask[0] == 1'b0;
       allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_ack_i[1] && empty_mask[1] == 1'b0;
 
       for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-        if ((rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id
-          || rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id) && !rs_q.free_entries[i]) begin
-          rs_n.free_entries[i] = 1'b1;
-          if (LSU_EN && rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id) begin
-            lsu_used_n = 1'b1;
-          end
+        // instr has been issued
+        if (rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id && !rs_q.free_entries[i]) begin
+            rs_n.free_entries[i] = 1'b1;
+            if (LSU_EN) begin
+                lsu_used_n = 1'b1; // locking lsu
+            end
+        end
+        // rollback
+        else if (rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id && !rs_q.free_entries[i]) begin
+            rs_n.free_entries[i] = 1'b1;
+            if (LSU_EN) begin
+                lsu_used_n = 1'b0; // unlocking lsu
+            end
         end
       end
 
@@ -427,7 +448,8 @@ module reservation_station
       is_result_available_gpr_q <= '1;
     end else begin
       rs_q <= rs_n;
-      lsu_used_q <= lsu_used_n;
+      // lsu_used_q <= lsu_used_n;
+      lsu_used_q <= '0;
       is_result_available_gpr_q <= is_result_available_gpr_n;
       if (FPR_ENABLED) begin
         is_result_available_fpr_q <= is_result_available_fpr_n;

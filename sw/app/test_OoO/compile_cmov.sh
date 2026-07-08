@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Variables
-ASM_FILE="test_cmov.s"
-OBJ_FILE="test_cmov.o"
-ELF_FILE="test_cmov.riscv"
-BIN_FILE="test_cmov.bin"
-MEM_FILE="test_cmov.mem"
+ASM_FILE="test_edge_case.s"
+OBJ_FILE="test_edge_case.o"
+ELF_FILE="test_edge_case.riscv"
+BIN_FILE="test_edge_case.bin"
+MEM_FILE="test_edge_case.mem"
 LINKER_SCRIPT="../../bsp/config/link.ld"
 OUTPUT_DIR="../"
 

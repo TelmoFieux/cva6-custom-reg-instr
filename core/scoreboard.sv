@@ -108,6 +108,8 @@ module scoreboard
     output logic                                         rollback_we_o,
     // op of the instruction to rollback - ISSUE_STAGE
     output fu_op                                         rollback_op_o,
+    // architectural destination register to rollback - ISSUE_STAGE
+    output logic [31:0]                                  rollback_arch_rd_o,
     // op of the instructions wrote back - ISSUE_STAGE
     output fu_op [CVA6Cfg.NrWbPorts-1:0]                 wb_op_o,
     // is writeback valid - ISSUE_STAGE
@@ -189,7 +191,7 @@ module scoreboard
       // make sure we assign the correct trans ID
       issue_instr_o[i].trans_id = issue_pointer[i];
 
-      issue_instr_valid_o[i]    = decoded_instr_valid_i[i] & ~issue_full[i];
+      issue_instr_valid_o[i]    = decoded_instr_valid_i[i] & ~issue_full[i] & (state_q == NORMAL);
     end
   end
 
@@ -226,7 +228,6 @@ module scoreboard
     // ------------
     // Write Back
     // ------------
-    assign wb_valid_o = wb_valid_gated;
     for (int unsigned i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
       // check if this instruction was issued (e.g.: it could happen after a flush that there is still
       // something in the pipeline e.g. an incomplete memory operation)
@@ -260,6 +261,8 @@ module scoreboard
 
       //updating write info
       wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued;
+      wb_valid_o = wb_valid_gated;
+
 
       wbaddr_o[i] = mem_q[trans_id_i[i]].sbe.rd;
       gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
@@ -389,16 +392,15 @@ module scoreboard
           end
         end
         WALKBACK : begin
+          rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
+          rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
+          rollback_we_o = mem_q[rollback_pointer_q].issued;
+          rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
+          rollback_arch_rd_o = mem_q[rollback_pointer_q].sbe.arch_rd;
+          rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
+          rollback_pointer_n = rollback_pointer_q - 1;
           if (rollback_pointer_q == bmiss_trans_id_q) begin
             state_n = NORMAL;
-            rollback_we_o = 1'b0;
-          end else begin
-            rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
-            rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
-            rollback_we_o = mem_q[rollback_pointer_q].issued;
-            rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
-            rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
-            rollback_pointer_n = rollback_pointer_q - 1;
           end
         end
       endcase

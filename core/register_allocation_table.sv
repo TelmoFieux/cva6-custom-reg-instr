@@ -33,7 +33,7 @@ module register_allocation_table
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_new_phys_i,
     input logic [ADDR_WIDTH-1:0]                              rollback_rd_i, // architectural register to rollback
-    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // architectural register to rollback
+    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // physical register to rollback
     input logic                                               rollback_we_i, // rollback is enabled
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i, //May be unnecessary to pass the entirety of the struct scoreboard_entry_t

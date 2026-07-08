@@ -95,7 +95,7 @@ module cva6
     // ID/EX/WB Stage
     localparam type scoreboard_entry_t = struct packed {
       logic [CVA6Cfg.RegAddrWidth-1:0] old_phys; // previous rat pointer that hold the current value of rd
-      logic [CVA6Cfg.RegAddrWidth-1:0] arch_rd; // architectural destination register. Usefull to update commit_rat
+      logic [31:0] arch_rd; // architectural destination register. Usefull to update commit_rat
       logic [CVA6Cfg.VLEN-1:0] pc;  // PC of instruction
       logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id; // this can potentially be simplified, we could index the scoreboard entry
       // with the transaction id in any case make the width more generic
