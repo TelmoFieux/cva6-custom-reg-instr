@@ -151,7 +151,7 @@ module instr_tracer #(
       //  Commit (In Order)
       // --------------
       for (int i = 0; i < 2; i++) begin
-        if (commit_ack[i]) begin
+        if (commit_ack[i] && commit_instr[i].valid) begin
           automatic int tid = int'(commit_instr[i].trans_id);
           commit_instruction = scoreboard_entry_t'(commit_instr[i]);
           
