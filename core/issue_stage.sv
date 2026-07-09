@@ -487,7 +487,7 @@ module issue_stage
       localparam logic en_lsu = fu == LOAD_STORE;
 
         for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
-          assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j];
+          assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j] & (!flush_unissued_instr_i && !flush_i);
           assign rm_id_i[j] = issue_instr_sb_iro[j].global_rs_id;
       end
 
