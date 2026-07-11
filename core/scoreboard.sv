@@ -149,7 +149,9 @@ module scoreboard
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_pointer_n, rollback_pointer_q;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] bmiss_trans_id_n, bmiss_trans_id_q;
   logic [CVA6Cfg.NrWbPorts-1:0] wb_valid_gated;
+  logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_boundary;
 
+  assign rollback_boundary = bmiss ? after_flu_wb : bmiss_trans_id_q;
 
   for (genvar i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
     assign still_issued[i] = mem_q[i].issued & ~mem_q[i].cancelled;
@@ -174,7 +176,10 @@ module scoreboard
     for (int unsigned i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin
       commit_instr_o[i] = mem_q[commit_pointer_q[i]].sbe;
       commit_instr_o[i].trans_id = commit_pointer_q[i];
-      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled;
+      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled || (bmiss && (commit_pointer_q[i] == after_flu_wb));
+      if ((bmiss || state_q == WALKBACK) && commit_pointer_q[i] == rollback_boundary) begin
+        commit_instr_o[i].valid = 1'b0;
+      end
     end
   end
 
