@@ -445,6 +445,7 @@ module cva6
   // LSU
   logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_id_ex;
   logic lsu_ready_ex_id;
+  logic rollback_store_buffer;
 
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] load_trans_id_ex_id;
   logic [CVA6Cfg.XLEN-1:0] load_result_ex_id;
@@ -917,11 +918,12 @@ module cva6
       // Performance Counters
       .stall_issue_o        (stall_issue),
       //RVFI
-      .rvfi_issue_pointer_o (rvfi_issue_pointer),
-      .rvfi_commit_pointer_o(rvfi_commit_pointer),
-      .rvfi_rs1_o           (rvfi_rs1),
-      .rvfi_rs2_o           (rvfi_rs2),
-      .rollback_en_o        (rollback_en_controller)
+      .rvfi_issue_pointer_o   (rvfi_issue_pointer),
+      .rvfi_commit_pointer_o  (rvfi_commit_pointer),
+      .rvfi_rs1_o             (rvfi_rs1),
+      .rvfi_rs2_o             (rvfi_rs2),
+      .rollback_store_buffer_o(rollback_store_buffer),
+      .rollback_en_o          (rollback_en_controller)
   );
 
   // ---------
@@ -986,6 +988,7 @@ module cva6
       .store_trans_id_o (store_trans_id_ex_id),
       .store_valid_o    (store_valid_ex_id),
       .store_exception_o(store_exception_ex_id),
+      .store_rollback_i   (rollback_store_buffer),
 
       .lsu_commit_i            (lsu_commit_commit_ex),           // from commit
       .lsu_commit_ready_o      (lsu_commit_ready_ex_commit),     // to commit

@@ -21,6 +21,7 @@ module scoreboard
     parameter type scoreboard_entry_t = logic,
     parameter type forwarding_t = logic,
     parameter type writeback_t = logic,
+    parameter type fu_data_t = logic,
     parameter type rs3_len_t = logic
 ) (
     // Subsystem Clock - SUBSYSTEM
@@ -97,6 +98,11 @@ module scoreboard
     output logic [ CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_issue_pointer_o,
     // Commit pointer - RVFI
     output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_commit_pointer_o,
+    // data sent to ex stage - ISSUE_READ_OPERANDS
+    input  fu_data_t [CVA6Cfg.NrIssuePorts-1:0]                         fu_data_i,
+    // is lsu valid - ISSUE_READ_OPERANDS
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                             lsu_valid_i,
+
 
     // physical destination register to rollback - ISSUE_STAGE
     output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_o,
@@ -106,6 +112,8 @@ module scoreboard
     output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_o,
     // is rollback active - ISSUE_STAGE
     output logic                                         rollback_we_o,
+    // is rollbacked instr a store - STORE_BUFFER
+    output logic                                         rollback_store_buffer_o,
     // op of the instruction to rollback - ISSUE_STAGE
     output fu_op                                         rollback_op_o,
     // architectural destination register to rollback - ISSUE_STAGE
@@ -121,6 +129,7 @@ module scoreboard
     logic issued;  // this bit indicates whether we issued this instruction e.g.: if it is valid
     logic cancelled;  // this instruction was cancelled (speculative scoreboard)
     logic is_rd_fpr_flag;  // redundant meta info, added for speed
+    logic dispatched_store; // instr is a store and was sent to execute
     scoreboard_entry_t sbe;  // this is the score board entry we will send to ex
   } sb_mem_t;
   sb_mem_t [CVA6Cfg.NR_SB_ENTRIES-1:0] mem_q, mem_n;
@@ -217,6 +226,7 @@ module scoreboard
             issued: 1'b1,
             cancelled: 1'b0,
             is_rd_fpr_flag: CVA6Cfg.FpPresent && ariane_pkg::is_rd_fpr(decoded_instr_i[i].op),
+            dispatched_store: 1'b0,
             sbe: decoded_instr_i[i]
         };
       end
@@ -273,6 +283,13 @@ module scoreboard
       gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
       fpr_we_o[i] =  is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
       wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;
+    end
+
+
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (fu_data_i[i].fu == STORE && lsu_valid_i[i]) begin
+        mem_n[fu_data_i[i].trans_id].dispatched_store = 1'b1;
+      end
     end
 
     // ------------
@@ -373,6 +390,7 @@ module scoreboard
     bmiss_trans_id_n    = bmiss_trans_id_q;
     rollback_rd_o = '0;
     rollback_we_o = 1'b0;
+    rollback_store_buffer_o = 1'b0;
     rollback_id_o = '0;
     rollback_old_phys_o = '0;
     rollback_op_o = ADD;
@@ -400,6 +418,7 @@ module scoreboard
           rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
           rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
           rollback_we_o = mem_q[rollback_pointer_q].issued;
+          rollback_store_buffer_o = mem_q[rollback_pointer_q].dispatched_store;
           rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
           rollback_arch_rd_o = mem_q[rollback_pointer_q].sbe.arch_rd;
           rollback_op_o = mem_q[rollback_pointer_q].sbe.op;

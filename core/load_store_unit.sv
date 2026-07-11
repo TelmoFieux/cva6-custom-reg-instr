@@ -65,6 +65,8 @@ module load_store_unit
     output logic store_valid_o,
     // Store exception - ISSUE_STAGE
     output exception_t store_exception_o,
+    // do we need to rollback the store buffer - SCOREBOARD
+    input logic store_rollback_i,
 
     // Commit the first pending store - TO_BE_COMPLETED
     input logic commit_i,
@@ -407,6 +409,7 @@ module load_store_unit
       .stall_st_pending_i,
       .no_st_pending_o,
       .store_buffer_empty_o(store_buffer_empty),
+      .store_buffer_rollback_i(store_rollback_i),
 
       .valid_i   (st_valid_i),
       .lsu_ctrl_i(lsu_ctrl),

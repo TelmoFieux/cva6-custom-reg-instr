@@ -25,6 +25,7 @@ module store_buffer
     input logic rst_ni,  // Asynchronous reset active low
     input logic flush_i,  // if we flush we need to pause the transactions on the memory
                           // otherwise we will run in a deadlock with the memory arbiter
+    input logic rollback_en_i,
     input logic stall_st_pending_i,  // Stall issuing non-speculative request
     output logic         no_st_pending_o, // non-speculative queue is empty (e.g.: everything is committed to the memory hierarchy)
     output logic         store_buffer_empty_o, // there is no store pending in neither the speculative unit or the non-speculative queue
@@ -112,6 +113,12 @@ module store_buffer
     end
 
     speculative_status_cnt_n = speculative_status_cnt;
+
+    if (rollback_en_i) begin
+     speculative_write_pointer_n = speculative_write_pointer_q - 1'b1;
+     speculative_queue_n[speculative_write_pointer_n].valid = 1'b0;
+     speculative_status_cnt_n = speculative_status_cnt_q - 1;
+   end
 
     // when we flush evict the speculative stores
     if (flush_i) begin

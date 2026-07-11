@@ -34,6 +34,8 @@ module store_unit
     output logic no_st_pending_o,
     // Store buffer is empty - TO_BE_COMPLETED
     output logic store_buffer_empty_o,
+    // do we need to rollback the store buffer - SCOREBOARD
+    input logic store_buffer_rollback_i,
     // Store instruction is valid - ISSUE_STAGE
     input logic valid_i,
     // Data input - ISSUE_STAGE
@@ -295,6 +297,7 @@ module store_unit
       .clk_i,
       .rst_ni,
       .flush_i,
+      .rollback_en_i (store_buffer_rollback_i),
       .stall_st_pending_i,
       .no_st_pending_o,
       .store_buffer_empty_o,

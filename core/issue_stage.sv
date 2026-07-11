@@ -172,6 +172,8 @@ module issue_stage
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs1_o,
     // Information dedicated to RVFI - RVFI
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs2_o,
+    // is rollbacked instr a store - STORE_BUFFER
+    output logic                                              rollback_store_buffer_o,
     // Is rollback active
     output logic                                              rollback_en_o
 );
@@ -644,6 +646,7 @@ module issue_stage
       .writeback_t(writeback_t),
       .forwarding_t(forwarding_t),
       .exception_t(exception_t),
+      .fu_data_t(fu_data_t),
       .scoreboard_entry_t(scoreboard_entry_t)
   ) i_scoreboard (
       .clk_i,
@@ -678,11 +681,14 @@ module issue_stage
       .fpr_we_o,
       .rvfi_issue_pointer_o,
       .rvfi_commit_pointer_o,
+      .fu_data_i               (fu_data_o),
+      .lsu_valid_i             (lsu_valid_o),
       .rollback_rd_o           (rollback_rd_i),
       .rollback_id_o,
       .rollback_old_phys_o     (rollback_old_phys_i),
       .rollback_op_o           (rollback_op_i),
       .rollback_we_o           (rollback_we_i),
+      .rollback_store_buffer_o,
       .rollback_arch_rd_o      (rollback_arch_rd_i),
       .wb_op_o,
       .wb_valid_o              (wb_valid_o)
