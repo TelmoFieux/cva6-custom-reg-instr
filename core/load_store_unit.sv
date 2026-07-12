@@ -47,6 +47,8 @@ module load_store_unit
     output logic lsu_ready_o,
     // Load Store Unit instruction is valid - ISSUE_STAGE
     input logic lsu_valid_i,
+    // do we need to rollback the lsu bypass buffer ? - SCOREBOARD
+    input logic lsu_rollback_i,
 
     // Load transaction ID - ISSUE_STAGE
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0] load_trans_id_o,
@@ -67,6 +69,11 @@ module load_store_unit
     output exception_t store_exception_o,
     // do we need to rollback the store buffer - SCOREBOARD
     input logic store_rollback_i,
+    // Has a store been dispatched ? - SCOREBOARD
+    output logic store_dispatched_o,
+    // Store dispatched trans_id - SCOREBOARD
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_o,
+
 
     // Commit the first pending store - TO_BE_COMPLETED
     input logic commit_i,
@@ -410,7 +417,8 @@ module load_store_unit
       .no_st_pending_o,
       .store_buffer_empty_o(store_buffer_empty),
       .store_buffer_rollback_i(store_rollback_i),
-
+      .store_dispatched_o,
+      .store_dispatched_id_o,
       .valid_i   (st_valid_i),
       .lsu_ctrl_i(lsu_ctrl),
       .pop_st_o  (pop_st),
@@ -759,6 +767,7 @@ module load_store_unit
       .clk_i,
       .rst_ni,
       .flush_i,
+      .rollback_en_i  (lsu_rollback_i),
       .lsu_req_i      (lsu_req_i),
       .lsu_req_valid_i(lsu_valid_i),
       .pop_ld_i       (pop_ld),

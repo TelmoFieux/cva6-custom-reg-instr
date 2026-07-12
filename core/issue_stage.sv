@@ -174,6 +174,13 @@ module issue_stage
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs2_o,
     // is rollbacked instr a store - STORE_BUFFER
     output logic                                              rollback_store_buffer_o,
+    // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
+    output logic                                         rollback_lsu_bypass_o,
+    // Has a store been dispatched ? - STORE_UNIT
+    input logic store_dispatched_i,
+    // Store dispatched trans_id - STORE_UNIT
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_i,
+
     // Is rollback active
     output logic                                              rollback_en_o
 );
@@ -410,7 +417,7 @@ module issue_stage
 
   localparam int unsigned NR_WB = 5;
   // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  localparam int unsigned RS_SIZE = 8;
+  localparam int unsigned RS_SIZE = 12;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -689,6 +696,9 @@ module issue_stage
       .rollback_op_o           (rollback_op_i),
       .rollback_we_o           (rollback_we_i),
       .rollback_store_buffer_o,
+      .rollback_lsu_bypass_o,
+      .store_dispatched_i,
+      .store_dispatched_id_i,
       .rollback_arch_rd_o      (rollback_arch_rd_i),
       .wb_op_o,
       .wb_valid_o              (wb_valid_o)

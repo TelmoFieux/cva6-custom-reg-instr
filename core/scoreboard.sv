@@ -114,6 +114,12 @@ module scoreboard
     output logic                                         rollback_we_o,
     // is rollbacked instr a store - STORE_BUFFER
     output logic                                         rollback_store_buffer_o,
+    // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
+    output logic                                         rollback_lsu_bypass_o,
+    // Has a store been dispatched ? - STORE_UNIT
+    input logic store_dispatched_i,
+    // Store dispatched trans_id - STORE_UNIT
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_i,
     // op of the instruction to rollback - ISSUE_STAGE
     output fu_op                                         rollback_op_o,
     // architectural destination register to rollback - ISSUE_STAGE
@@ -129,7 +135,8 @@ module scoreboard
     logic issued;  // this bit indicates whether we issued this instruction e.g.: if it is valid
     logic cancelled;  // this instruction was cancelled (speculative scoreboard)
     logic is_rd_fpr_flag;  // redundant meta info, added for speed
-    logic dispatched_store; // instr is a store and was sent to execute
+    logic lsu_dispatched; // instr is a store/load and was sent to execute
+    logic store_dispatched; // instr is a store and was sent to store buffer
     scoreboard_entry_t sbe;  // this is the score board entry we will send to ex
   } sb_mem_t;
   sb_mem_t [CVA6Cfg.NR_SB_ENTRIES-1:0] mem_q, mem_n;
@@ -226,7 +233,8 @@ module scoreboard
             issued: 1'b1,
             cancelled: 1'b0,
             is_rd_fpr_flag: CVA6Cfg.FpPresent && ariane_pkg::is_rd_fpr(decoded_instr_i[i].op),
-            dispatched_store: 1'b0,
+            lsu_dispatched: 1'b0,
+            store_dispatched: 1'b0,
             sbe: decoded_instr_i[i]
         };
       end
@@ -287,8 +295,14 @@ module scoreboard
 
 
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (fu_data_i[i].fu == STORE && lsu_valid_i[i]) begin
-        mem_n[fu_data_i[i].trans_id].dispatched_store = 1'b1;
+      // memory operation enters lsu
+      if (fu_data_i[i].fu inside {LOAD, STORE} && lsu_valid_i[i] ) begin
+        mem_n[fu_data_i[i].trans_id].lsu_dispatched = 1'b1;
+      end
+
+      // store operation enters store buffer
+      if (store_dispatched_i) begin
+        mem_n[store_dispatched_id_i].store_dispatched = 1'b1;
       end
     end
 
@@ -310,9 +324,11 @@ module scoreboard
     for (int i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin
       if (commit_ack_i[i]) begin
         // this instruction is no longer in issue e.g.: it is considered finished
-        mem_n[commit_pointer_q[i]].issued    = 1'b0;
-        mem_n[commit_pointer_q[i]].cancelled = 1'b0;
-        mem_n[commit_pointer_q[i]].sbe.valid = 1'b0;
+        mem_n[commit_pointer_q[i]].issued           = 1'b0;
+        mem_n[commit_pointer_q[i]].cancelled        = 1'b0;
+        mem_n[commit_pointer_q[i]].sbe.valid        = 1'b0;
+        mem_n[commit_pointer_q[i]].lsu_dispatched   = 1'b0;
+        mem_n[commit_pointer_q[i]].store_dispatched = 1'b0;
       end
     end
 
@@ -323,10 +339,12 @@ module scoreboard
       // flush
       for (int unsigned i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
         // set all valid flags for all entries to zero
-        mem_n[i].issued       = 1'b0;
-        mem_n[i].cancelled    = 1'b0;
-        mem_n[i].sbe.valid    = 1'b0;
-        mem_n[i].sbe.ex.valid = 1'b0;
+        mem_n[i].issued           = 1'b0;
+        mem_n[i].cancelled        = 1'b0;
+        mem_n[i].sbe.valid        = 1'b0;
+        mem_n[i].sbe.ex.valid     = 1'b0;
+        mem_n[i].lsu_dispatched   = 1'b0;
+        mem_n[i].store_dispatched = 1'b0;
       end
     end
 
@@ -334,10 +352,12 @@ module scoreboard
     // End of rollback after branch misprediction
     // ------------
     if (state_q == WALKBACK) begin
-      mem_n[rollback_pointer_q].issued       = 1'b0;
-      mem_n[rollback_pointer_q].cancelled    = 1'b0;
-      mem_n[rollback_pointer_q].sbe.valid    = 1'b0;
-      mem_n[rollback_pointer_q].sbe.ex.valid = 1'b0;
+      mem_n[rollback_pointer_q].issued           = 1'b0;
+      mem_n[rollback_pointer_q].cancelled        = 1'b0;
+      mem_n[rollback_pointer_q].sbe.valid        = 1'b0;
+      mem_n[rollback_pointer_q].sbe.ex.valid     = 1'b0;
+      mem_n[rollback_pointer_q].lsu_dispatched   = 1'b0;
+      mem_n[rollback_pointer_q].store_dispatched = 1'b0;
     end
 
   end
@@ -391,6 +411,7 @@ module scoreboard
     rollback_rd_o = '0;
     rollback_we_o = 1'b0;
     rollback_store_buffer_o = 1'b0;
+    rollback_lsu_bypass_o = 1'b0;
     rollback_id_o = '0;
     rollback_old_phys_o = '0;
     rollback_op_o = ADD;
@@ -418,7 +439,8 @@ module scoreboard
           rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
           rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
           rollback_we_o = mem_q[rollback_pointer_q].issued;
-          rollback_store_buffer_o = mem_q[rollback_pointer_q].dispatched_store;
+          rollback_store_buffer_o = mem_q[rollback_pointer_q].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_pointer_q);
+          rollback_lsu_bypass_o = mem_q[rollback_pointer_q].lsu_dispatched;
           rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
           rollback_arch_rd_o = mem_q[rollback_pointer_q].sbe.arch_rd;
           rollback_op_o = mem_q[rollback_pointer_q].sbe.op;

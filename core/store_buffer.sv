@@ -118,7 +118,7 @@ module store_buffer
      speculative_write_pointer_n = speculative_write_pointer_q - 1'b1;
      speculative_queue_n[speculative_write_pointer_n].valid = 1'b0;
      speculative_status_cnt_n = speculative_status_cnt_q - 1;
-   end
+    end
 
     // when we flush evict the speculative stores
     if (flush_i) begin

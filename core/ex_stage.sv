@@ -85,6 +85,8 @@ module ex_stage
     output logic lsu_ready_o,
     // LSU instruction is valid - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_i,
+    // do we need to rollback the lsu bypass buffer ? - SCOREBOARD
+    input logic lsu_rollback_i,
     // Load result is valid - ISSUE_STAGE
     output logic load_valid_o,
     // Load result valid - ISSUE_STAGE
@@ -103,6 +105,10 @@ module ex_stage
     output exception_t store_exception_o,
     // do we rollback the store buffer - SCOREBOARD
     input logic store_rollback_i,
+    // Has a store been dispatched ? - SCOREBOARD
+    output logic store_dispatched_o,
+    // Store dispatched trans_id - SCOREBOARD
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_o,
     // LSU commit - COMMIT_STAGE
     input logic lsu_commit_i,
     // Commit queue ready to accept another commit request - COMMIT_STAGE
@@ -541,6 +547,7 @@ module ex_stage
       .fu_data_i             (lsu_data),
       .lsu_ready_o,
       .lsu_valid_i           (|lsu_valid_i),
+      .lsu_rollback_i,
       .load_trans_id_o,
       .load_result_o,
       .load_valid_o,
@@ -550,6 +557,9 @@ module ex_stage
       .store_valid_o,
       .store_exception_o,
       .store_rollback_i,
+      .store_dispatched_o,
+      .store_dispatched_id_o,
+
       .commit_i              (lsu_commit_i),
       .commit_ready_o        (lsu_commit_ready_o),
       .commit_tran_id_i,
