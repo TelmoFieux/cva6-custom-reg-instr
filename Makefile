@@ -34,7 +34,7 @@ dpi-library    ?= work-dpi
 # Top level module to compile
 top_level      ?= ariane_tb
 # Maximum amount of cycles for a successful simulation run
-max_cycles     ?= 1000000000
+max_cycles     ?= 10000000
 # Test case to run
 test_case      ?= core_test
 # QuestaSim Version

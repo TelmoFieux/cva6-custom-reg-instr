@@ -47,7 +47,7 @@ package cva6_config_pkg;
 
   localparam CVA6ConfigWtDcacheWbufDepth = 2;
 
-  localparam CVA6ConfigNrScoreboardEntries = 16;
+  localparam CVA6ConfigNrScoreboardEntries = 32;
 
   localparam CVA6ConfigNrLoadPipeRegs = 1;
   localparam CVA6ConfigNrStorePipeRegs = 0;
@@ -71,7 +71,7 @@ package cva6_config_pkg;
 
   // OoO parameters
   localparam CVA6ConfigRegAddrWidth = 6;
-  localparam CVA6ConfigGlobalRsIdWidth = 32;
+  localparam CVA6ConfigGlobalRsIdWidth = 16;
 
   localparam config_pkg::cva6_user_cfg_t cva6_cfg = '{
       XLEN: unsigned'(CVA6ConfigXlen),

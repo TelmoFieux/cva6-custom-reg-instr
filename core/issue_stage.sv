@@ -225,6 +225,7 @@ module issue_stage
   logic [CVA6Cfg.NrIssuePorts-1:0] issue_we_i;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] gpr_renamed_instr_i, fpr_renamed_instr_i;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id_n, global_rs_id_q;
+  logic [CVA6Cfg.NrIssuePorts-1:0] empty_gpr,empty_fpr;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] renamed_instr_i;
   rat_table_t                                   gpr_commit_rat, fpr_commit_rat;
   logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_i;
@@ -234,8 +235,16 @@ module issue_stage
   fu_op                                         rollback_op_i;
   logic                                         gpr_rollback_we_i;
   logic [CVA6Cfg.NrIssuePorts-1:0]              issue_instr_ack;
+  logic [CVA6Cfg.NrIssuePorts-1:0]              issue_fpr_we_i;
+  logic                                         fpr_rollback_we_i;
+
 
   assign rollback_en_o = rollback_we_i;
+  if (!CVA6Cfg.FpPresent) begin
+    assign empty_fpr = '0;
+    assign issue_fpr_we_i = '0;
+    assign fpr_rollback_we_i = '0;
+  end
 
   //We only modify the RAT corrsponding to the correct registers
   always_comb begin : gpr_we
@@ -265,6 +274,7 @@ module issue_stage
   ) i_issue_register_allocation_table (
         .clk_i,
         .rst_ni,
+        .empty_o                 (empty_gpr),
         .we_i                    (issue_we_i),
         .commit_valid_i          (commit_ack_i),
         .commit_old_phys_i       (commit_old_phys_i),
@@ -293,6 +303,7 @@ module issue_stage
   ) i_commit_register_allocation_table (
         .clk_i,
         .rst_ni,
+        .empty_o                 (),
         .we_i                    ('0),
         .commit_valid_i          (commit_ack_i),
         .commit_old_phys_i       (commit_old_phys_i),
@@ -311,8 +322,6 @@ module issue_stage
   );
 
   if (CVA6Cfg.FpPresent) begin
-    logic [CVA6Cfg.NrIssuePorts-1:0] issue_fpr_we_i;
-    logic                            fpr_rollback_we_i;
 
 
     always_comb begin : fpr_we
@@ -337,6 +346,7 @@ module issue_stage
     ) i_issue_fp_register_allocation_table (
           .clk_i,
           .rst_ni,
+          .empty_o                 (empty_fpr),
           .we_i                    (issue_fpr_we_i),
           .commit_valid_i          (commit_ack_i),
           .commit_old_phys_i       (commit_old_phys_i),
@@ -366,6 +376,7 @@ module issue_stage
     ) i_commit_fp_register_allocation_table (
           .clk_i,
           .rst_ni,
+          .empty_o                 (),
           .we_i                    ('0),
           .commit_valid_i          (commit_ack_i),
           .commit_old_phys_i       (commit_old_phys_i),
@@ -417,7 +428,7 @@ module issue_stage
 
   localparam int unsigned NR_WB = 5;
   // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  localparam int unsigned RS_SIZE = 12;
+  localparam int unsigned RS_SIZE = 16;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -628,10 +639,14 @@ module issue_stage
   end
 
   always_comb begin : instr_ack_update
-    //if rs and scoreboard succesfully added the instr we validate the Handshake
-    decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[0] && !final_rs_full[0]) : 1'b0;
+    //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
+    decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ?
+        (empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0]) ? 1'b0 :
+      (issue_instr_ack[0] && !final_rs_full[0]) : 1'b0;
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
-      decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ? (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1]) : 1'b0;
+      decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ?
+          (empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i]) ? 1'b0 :
+        (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1]) : 1'b0;
     end
   end
 
