@@ -95,7 +95,7 @@ module cva6
     // ID/EX/WB Stage
     localparam type scoreboard_entry_t = struct packed {
       logic [CVA6Cfg.RegAddrWidth-1:0] old_phys; // previous rat pointer that hold the current value of rd
-      logic [CVA6Cfg.RegAddrWidth-1:0] arch_rd; // architectural destination register. Usefull to update commit_rat
+      logic [31:0] arch_rd; // architectural destination register. Usefull to update commit_rat
       logic [CVA6Cfg.VLEN-1:0] pc;  // PC of instruction
       logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id; // this can potentially be simplified, we could index the scoreboard entry
       // with the transaction id in any case make the width more generic
@@ -1682,13 +1682,10 @@ module cva6
       .commit_ack(commit_ack),
       .st_valid(ex_stage_i.lsu_i.i_store_unit.store_buffer_i.valid_i),
       .st_paddr(ex_stage_i.lsu_i.i_store_unit.store_buffer_i.paddr_i),
-      .st_trans_id(ex_stage_i.lsu_i.i_store_unit.lsu_ctrl_i.trans_id),
       .ld_valid(ex_stage_i.lsu_i.i_load_unit.req_port_o.tag_valid),
       .ld_kill(ex_stage_i.lsu_i.i_load_unit.req_port_o.kill_req),
       .ld_paddr(ex_stage_i.lsu_i.i_load_unit.paddr_i),
-      .ld_trans_id(ex_stage_i.lsu_i.i_load_unit.lsu_ctrl_i.trans_id),
       .resolve_branch(resolved_branch),
-      .bp_trans_id(flu_trans_id_ex_id),
       .commit_exception(commit_stage_i.exception_o),
       .priv_lvl(priv_lvl),
       .debug_mode(debug_mode),
