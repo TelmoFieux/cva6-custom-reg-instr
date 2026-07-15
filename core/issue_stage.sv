@@ -173,10 +173,7 @@ module issue_stage
     // Information dedicated to RVFI - RVFI
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs2_o,
     // Is rollback active
-    output logic                                              rollback_en_o,
-    output logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o,
-    output logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o,
-    output logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o
+    output logic                                              rollback_en_o
 );
   // ---------------------------------------------------
   // Scoreboard (SB) <-> Issue and Read Operands (IRO)
@@ -206,6 +203,9 @@ module issue_stage
 
   logic x_transaction_accepted_iro_sb, x_issue_writeback_iro_sb;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] x_id_iro_sb;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o;
+  logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o;
+  logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o;
 
   assign stall_issue_o = '0;
 
