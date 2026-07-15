@@ -46,8 +46,6 @@ module issue_read_operands
     input logic [CVA6Cfg.NrIssuePorts-1:0] issue_instr_valid_i,
     // Issue stage acknowledge - SCOREBOARD
     output logic [CVA6Cfg.NrIssuePorts-1:0] issue_ack_o,
-    // Forwarding - SCOREBOARD
-    input forwarding_t fwd_i,
     // FU data useful to execute instruction - EX_STAGE
     output fu_data_t [CVA6Cfg.NrIssuePorts-1:0] fu_data_o,
     // Unregistered version of fu_data_o.operanda - EX_STAGE

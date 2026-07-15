@@ -69,8 +69,6 @@ module scoreboard
     output logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_valid_o,
     // Issue stage acknowledge - ISSUE_READ_OPERANDS
     input  logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_ack_i,
-    // Forwarding - ISSUE_READ_OPERANDS
-    output forwarding_t                                        fwd_o,
 
     // Result from branch unit - EX_STAGE
     input bp_resolve_t resolved_branch_i,
@@ -139,6 +137,7 @@ module scoreboard
     logic store_dispatched; // instr is a store and was sent to store buffer
     scoreboard_entry_t sbe;  // this is the score board entry we will send to ex
   } sb_mem_t;
+
   sb_mem_t [CVA6Cfg.NR_SB_ENTRIES-1:0] mem_q, mem_n;
   logic [CVA6Cfg.NR_SB_ENTRIES-1:0] still_issued;
 
@@ -147,7 +146,6 @@ module scoreboard
 
   logic bmiss;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] after_flu_wb;
-  logic [CVA6Cfg.NR_SB_ENTRIES-1:0] speculative_instrs;
 
   logic [CVA6Cfg.NrIssuePorts-1:0] num_issue;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] issue_pointer_n, issue_pointer_q;
@@ -386,22 +384,6 @@ module scoreboard
   // precompute offsets for commit slots
   for (genvar k = 1; k < CVA6Cfg.NrCommitPorts; k++) begin : gen_cnt_incr
     assign commit_pointer_n[k] = (flush_i) ? '0 : commit_pointer_n[0] + unsigned'(k);
-  end
-
-  // Forwarding logic
-  writeback_t [CVA6Cfg.NrWbPorts-1:0] wb;
-  for (genvar i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
-    assign wb[i].valid = wt_valid_i[i];
-    assign wb[i].data = wbdata_i[i];
-    assign wb[i].ex_valid = ex_i[i].valid;
-    assign wb[i].trans_id = trans_id_i[i];
-  end
-
-  assign fwd_o.still_issued = still_issued;
-  assign fwd_o.issue_pointer = issue_pointer;
-  assign fwd_o.wb = wb;
-  for (genvar i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
-    assign fwd_o.sbe[i] = mem_q[i].sbe;
   end
 
   always_comb begin : rollback
