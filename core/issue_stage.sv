@@ -432,7 +432,7 @@ module issue_stage
 
   localparam int unsigned NR_WB = 5;
   // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  localparam int unsigned RS_SIZE = 16;
+  localparam int unsigned RS_SIZE = 8;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;

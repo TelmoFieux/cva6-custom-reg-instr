@@ -27,6 +27,7 @@ module tournament_tree #(
   logic [TREE_SIZE-1:0][ID_SIZE-1:0] seq_num_tree;
   logic [TREE_SIZE-1:0][$clog2(NR_PLAYER)-1:0] id_tree;
   logic [TREE_SIZE-1:0] valid_tree;
+  logic signed [ID_SIZE-1:0] diff;
 
   always_comb begin : tournament
     seq_num_tree = '0;
@@ -40,7 +41,8 @@ module tournament_tree #(
     end
 
     for (int i = NR_PLAYER-1 ; i > 0 ; i--) begin
-      if (valid_tree[2*i] && (!valid_tree[2*i+1] || (seq_num_tree[2*i] < seq_num_tree[2*i+1]))) begin
+      diff = seq_num_tree[2*i+1] - seq_num_tree[2*i];
+      if (valid_tree[2*i] && (!valid_tree[2*i+1] || (diff[ID_SIZE-1] == 1'b0 && diff != '0))) begin
         seq_num_tree[i] = seq_num_tree[2*i];
         valid_tree[i]   = valid_tree[2*i];
         id_tree[i]      = id_tree[2*i];
