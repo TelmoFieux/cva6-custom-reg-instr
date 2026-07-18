@@ -54,11 +54,18 @@ module instr_tracer #(
 );
 
   // keep the decoded instructions in a queue
+  // (reste un FIFO : le dispatch decode -> scoreboard/RS est toujours fait
+  // strictement en ordre programme, une seule instruction a la fois via
+  // issue_ack, donc aucun risque de desynchronisation ici, meme en OoO)
   logic [31:0] decode_queue [$];
-  // keep the issued instructions in a queue
-  logic [31:0] issue_queue [$];
-  // issue scoreboard entries
-  scoreboard_entry_t issue_sbe_queue [$];
+  // keep the issued instructions, indexees par trans_id
+  // (tableau associatif : en OoO le retrait/commit d'une instruction ne se
+  // fait plus forcement dans le meme ordre que son emission, un FIFO ne
+  // peut donc plus etre utilise pour retrouver l'instruction correspondante
+  // au moment du commit)
+  logic [31:0] issue_queue [int];
+  // issue scoreboard entries, meme cle (trans_id) que issue_queue
+  scoreboard_entry_t issue_sbe_queue [int];
   scoreboard_entry_t issue_sbe_item;
   // store resolved branches, get (mis-)predictions
   bp_resolve_t bp [$];
@@ -87,6 +94,9 @@ module instr_tracer #(
   task trace();
     automatic logic [31:0] decode_instruction, issue_instruction, issue_commit_instruction;
     automatic scoreboard_entry_t commit_instruction;
+    // cle (trans_id) de l'instruction en train de committer, utilisee pour
+    // retrouver son entree dans issue_queue/issue_sbe_queue
+    automatic int commit_trans_id;
     // initialize register 0
     gp_reg_file  = '{default:0};
     fp_reg_file  = '{default:0};
@@ -117,9 +127,11 @@ module instr_tracer #(
       // the issue queue
       if (issue_ack && !flush_unissued) begin
         issue_instruction = decode_queue.pop_front();
-        issue_queue.push_back(issue_instruction);
-        // also save the scoreboard entry to a separate issue queue
-        issue_sbe_queue.push_back(scoreboard_entry_t'(issue_sbe));
+        // indexation par trans_id : cette instruction pourra committer
+        // avant ou apres d'autres instructions emises plus tot/plus tard
+        issue_queue[int'(issue_sbe.trans_id)] = issue_instruction;
+        // also save the scoreboard entry, meme cle
+        issue_sbe_queue[int'(issue_sbe.trans_id)] = scoreboard_entry_t'(issue_sbe);
       end
 
       // --------------------
@@ -145,8 +157,27 @@ module instr_tracer #(
       for (int i = 0; i < 2; i++) begin
         if (commit_ack[i]) begin
           commit_instruction = scoreboard_entry_t'(commit_instr[i]);
-          issue_commit_instruction = issue_queue.pop_front();
-          issue_sbe_item = issue_sbe_queue.pop_front();
+          commit_trans_id    = int'(commit_instruction.trans_id);
+
+          // retrouve l'instruction/sbe correspondantes via trans_id : en OoO
+          // le port de commit i ne correspond plus a "la i-eme instruction
+          // emise", donc plus de pop_front possible
+          if (issue_queue.exists(commit_trans_id)) begin
+            issue_commit_instruction = issue_queue[commit_trans_id];
+            issue_queue.delete(commit_trans_id);
+          end else begin
+            issue_commit_instruction = '0;
+            $error("[TRACER] hart %0d: commit trans_id=%0d absent de issue_queue", hart_id_i, commit_trans_id);
+          end
+
+          if (issue_sbe_queue.exists(commit_trans_id)) begin
+            issue_sbe_item = issue_sbe_queue[commit_trans_id];
+            issue_sbe_queue.delete(commit_trans_id);
+          end else begin
+            issue_sbe_item = commit_instruction;
+            $error("[TRACER] hart %0d: commit trans_id=%0d absent de issue_sbe_queue", hart_id_i, commit_trans_id);
+          end
+
           // check if the instruction retiring is a load or store, get the physical address accordingly
           if (commit_instr[i].fu == ariane_pkg::LOAD)
             address_mapping = load_mapping.pop_front();
@@ -155,16 +186,15 @@ module instr_tracer #(
 
           if (commit_instr[i].fu == ariane_pkg::CTRL_FLOW)
             bp_instruction = bp.pop_front();
-          // the scoreboards issue entry still contains the immediate value as a result
-          // check if the write back is valid, if not we need to source the result from the register file
-          // as the most recent version of this register will be there.
-          if (we_gpr[i] || we_fpr[i]) begin
-            printInstr(issue_sbe_item, issue_commit_instruction, wdata[i], address_mapping, priv_lvl, debug_mode, bp_instruction);
-          end else if (ariane_pkg::is_rd_fpr(commit_instruction.op)) begin
-            printInstr(issue_sbe_item, issue_commit_instruction, fp_reg_file[commit_instruction.rd], address_mapping, priv_lvl, debug_mode, bp_instruction);
-          end else begin
-            printInstr(issue_sbe_item, issue_commit_instruction, gp_reg_file[commit_instruction.rd], address_mapping, priv_lvl, debug_mode, bp_instruction);
-          end
+
+          // le resultat de CETTE instruction est deja ecrit dans son entree
+          // scoreboard au moment du writeback (bien avant le commit), donc
+          // commit_instruction.result est toujours valide ici. On n'utilise
+          // plus we_gpr[i]/we_fpr[i]/wdata[i] pour cette decision : ces
+          // signaux sont desormais indexes par port de writeback
+          // (CVA6Cfg.NrWbPorts, un port par FU), pas par port de commit,
+          // donc l'indice i ici ne designerait plus la bonne FU.
+          printInstr(issue_sbe_item, issue_commit_instruction, commit_instruction.result, address_mapping, priv_lvl, debug_mode, bp_instruction);
         end
       end
       // --------------
@@ -178,7 +208,12 @@ module instr_tracer #(
       // Commit Registers
       // ----------------------
       // update shadow reg files here
-      for (int i = 0; i < 2; i++) begin
+      // boucle sur CVA6Cfg.NrWbPorts (un port par FU) et non plus 2 : waddr/
+      // we_gpr/we_fpr sont desormais dimensionnes sur le nombre de ports de
+      // writeback, une borne fixe a 2 laisserait certains FU ne jamais
+      // mettre a jour la copie shadow (utilisee pour l'affichage des
+      // operandes source dans le desassemblage)
+      for (int i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
         if (we_gpr[i] && waddr[i] != '0) begin
           gp_reg_file[waddr[i]] = wdata[i];
         end else if (we_fpr[i]) begin
@@ -208,10 +243,12 @@ module instr_tracer #(
   // flush everything, we took an exception/interrupt
   function void flush ();
     flushDecode();
-    // clear all elements in the queue
-    issue_queue     = {};
-    issue_sbe_queue = {};
-    // also clear mappings
+    // clear all elements : tableaux associatifs -> delete() sans argument
+    // vide l'integralite du tableau (equivalent du "= {}" utilise pour les
+    // FIFOs juste en dessous)
+    issue_queue.delete();
+    issue_sbe_queue.delete();
+    // also clear mappings (restent des FIFOs, voir note plus haut)
     store_mapping   = {};
     load_mapping    = {};
     bp              = {};
