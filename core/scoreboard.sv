@@ -74,6 +74,8 @@ module scoreboard
     input bp_resolve_t resolved_branch_i,
     // Transaction ID at which to write the result back - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] trans_id_i,
+    // Global ID of the instructions - EX_STAGE
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] global_id_i,
     // Results to write back - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata_i,
     // Exception from a functional unit (e.g.: ld/st exception) - EX_STAGE
@@ -113,7 +115,9 @@ module scoreboard
     // is rollbacked instr a store - STORE_BUFFER
     output logic                                         rollback_store_buffer_o,
     // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
-    output logic                                         rollback_lsu_bypass_o,
+    output logic                                         rollback_ex_o,
+    // rollback trans id - EX_STAGE
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]             rollback_trans_id_o,
     // Has a store been dispatched ? - STORE_UNIT
     input logic store_dispatched_i,
     // Store dispatched trans_id - STORE_UNIT
@@ -250,9 +254,14 @@ module scoreboard
     // Write Back
     // ------------
     for (int unsigned i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
+      automatic logic wb_id_match;
+      wb_id_match = (i == LOAD_WB)
+          ? (mem_q[trans_id_i[i]].sbe.global_rs_id == global_id_i[i])
+          : 1'b1;
+
       // check if this instruction was issued (e.g.: it could happen after a flush that there is still
       // something in the pipeline e.g. an incomplete memory operation)
-      if (wt_valid_i[i] && mem_q[trans_id_i[i]].issued) begin
+      if (wt_valid_i[i] && mem_q[trans_id_i[i]].issued && wb_id_match) begin
         if (mem_q[trans_id_i[i]].sbe.is_double_rd_macro_instr && mem_q[trans_id_i[i]].sbe.is_macro_instr) begin
           if (mem_q[trans_id_i[i]].sbe.is_last_macro_instr) begin
             mem_n[trans_id_i[i]].sbe.valid = 1'b1;
@@ -281,7 +290,7 @@ module scoreboard
       end
 
       //updating write info
-      wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued;
+      wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued && wb_id_match;
       wb_valid_o = wb_valid_gated;
 
 
@@ -393,10 +402,11 @@ module scoreboard
     rollback_rd_o = '0;
     rollback_we_o = 1'b0;
     rollback_store_buffer_o = 1'b0;
-    rollback_lsu_bypass_o = 1'b0;
+    rollback_ex_o = 1'b0;
     rollback_id_o = '0;
     rollback_old_phys_o = '0;
     rollback_op_o = ADD;
+    rollback_trans_id_o = '0;
 
     if (flush_i) begin
       state_n            = NORMAL;
@@ -422,8 +432,9 @@ module scoreboard
           rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
           rollback_we_o = mem_q[rollback_pointer_q].issued;
           rollback_store_buffer_o = mem_q[rollback_pointer_q].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_pointer_q);
-          rollback_lsu_bypass_o = mem_q[rollback_pointer_q].lsu_dispatched;
+          rollback_ex_o = mem_q[rollback_pointer_q].issued;
           rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
+          rollback_trans_id_o = mem_q[rollback_pointer_q].sbe.trans_id;
           rollback_arch_rd_o = mem_q[rollback_pointer_q].sbe.arch_rd;
           rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
           rollback_pointer_n = rollback_pointer_q - 1;

@@ -33,6 +33,10 @@ module load_unit
     input logic rst_ni,
     // Flush signal - CONTROLLER
     input logic flush_i,
+    // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
+    input logic rollback_i,
+    // trans if of instruction to rollback - SCOREBOARD
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
     // Load request is valid - LSU_BYPASS
     input logic valid_i,
     // Load request input - LSU_BYPASS
@@ -43,6 +47,8 @@ module load_unit
     output logic valid_o,
     // Load transaction ID - ISSUE_STAGE
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id_o,
+    // Load Global ID - ISSUE_STAGE
+    output logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_id_o,
     // Load result - ISSUE_STAGE
     output logic [CVA6Cfg.XLEN-1:0] result_o,
     // Load exception - ISSUE_STAGE
@@ -97,6 +103,7 @@ module load_unit
   // we need a a buffer which can hold all inflight memory load requests
   typedef struct packed {
     logic [CVA6Cfg.TRANS_ID_BITS-1:0]    trans_id;        // scoreboard identifier
+    logic [CVA6Cfg.GlobalRsIdWidth-1:0]  global_id;
     logic [CVA6Cfg.XLEN_ALIGN_BYTES-1:0] address_offset;  // least significant bits of the address
     fu_op                                operation;       // type of load
   } ldbuf_t;
@@ -157,6 +164,14 @@ module load_unit
     if (flush_i) begin
       ldbuf_flushed_d = '1;
     end
+
+    // squash entry on rollback
+    for (int unsigned i = 0; i < CVA6Cfg.NrLoadBufEntries; i++) begin
+      if (ldbuf_valid_q[i] && ldbuf_q[i].trans_id == rollback_trans_id_i && rollback_i) begin
+        ldbuf_flushed_d[i] = '1;
+      end
+    end
+
     //  Free read entry (in the case of fall-through mode, free the entry
     //  only if there is no pending load)
     if (ldbuf_r && (!LDBUF_FALLTHROUGH || !ldbuf_w)) begin
@@ -198,7 +213,7 @@ module load_unit
   assign req_port_o.data_wdata = '0;
   // compose the load buffer write data, control is handled in the FSM
   assign ldbuf_wdata = {
-    lsu_ctrl_i.trans_id, lsu_ctrl_i.vaddr[CVA6Cfg.XLEN_ALIGN_BYTES-1:0], lsu_ctrl_i.operation
+    lsu_ctrl_i.trans_id, lsu_ctrl_i.global_id, lsu_ctrl_i.vaddr[CVA6Cfg.XLEN_ALIGN_BYTES-1:0], lsu_ctrl_i.operation
   };
   // output address
   // we can now output the lower 12 bit as the index to the cache
@@ -426,6 +441,7 @@ module load_unit
     //  read the pending load buffer
     ldbuf_r    = req_port_i.data_rvalid;
     trans_id_o = ldbuf_q[ldbuf_rindex].trans_id;
+    global_id_o = ldbuf_q[ldbuf_rindex].global_id;
     valid_o    = 1'b0;
     ex_o.valid = 1'b0;
 
@@ -448,6 +464,7 @@ module load_unit
     // round in the load FSM
     if ((CVA6Cfg.MmuPresent || CVA6Cfg.NonIdemPotenceEn) && (state_q == WAIT_TRANSLATION) && !req_port_i.data_rvalid && ex_i.valid && valid_i) begin
       trans_id_o = lsu_ctrl_i.trans_id;
+      global_id_o = lsu_ctrl_i.global_id;
       valid_o = 1'b1;
       ex_o.valid = 1'b1;
     end

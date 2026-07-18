@@ -12,6 +12,10 @@ module mult
     input  logic                                 rst_ni,
     // Flush - CONTROLLER
     input  logic                                 flush_i,
+    // Rollback - SCOREBOARD
+    input  logic                                 rollback_i,
+    // Rollback trans ID - SCOREBOARD
+    input  logic [CVA6Cfg.TRANS_ID_BITS-1:0]     rollback_trans_id_i,
     // FU data needed to execute instruction - ISSUE_STAGE
     input  fu_data_t                             fu_data_i,
     // Mult instruction is valid - ISSUE_STAGE
@@ -126,19 +130,21 @@ module mult
       .CVA6Cfg(CVA6Cfg),
       .WIDTH  (CVA6Cfg.XLEN)
   ) i_div (
-      .clk_i    (clk_i),
-      .rst_ni   (rst_ni),
-      .id_i     (fu_data_i.trans_id),
-      .op_a_i   (operand_a),
-      .op_b_i   (operand_b),
-      .opcode_i ({rem, div_signed}),   // 00: udiv, 10: urem, 01: div, 11: rem
-      .in_vld_i (div_valid_op),
-      .in_rdy_o (mult_ready_o),
-      .flush_i  (flush_i),
-      .out_vld_o(div_valid),
-      .out_rdy_i(div_ready_i),
-      .id_o     (div_trans_id),
-      .res_o    (result)
+      .clk_i               (clk_i),
+      .rst_ni              (rst_ni),
+      .rollback_i          (rollback_i),
+      .rollback_trans_id_i (rollback_trans_id_i),
+      .id_i                (fu_data_i.trans_id),
+      .op_a_i              (operand_a),
+      .op_b_i              (operand_b),
+      .opcode_i            ({rem, div_signed}),   // 00: udiv, 10: urem, 01: div, 11: rem
+      .in_vld_i            (div_valid_op),
+      .in_rdy_o            (mult_ready_o),
+      .flush_i             (flush_i),
+      .out_vld_o           (div_valid),
+      .out_rdy_i           (div_ready_i),
+      .id_o                (div_trans_id),
+      .res_o               (result)
   );
 
   // Result multiplexer

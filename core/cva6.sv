@@ -155,27 +155,29 @@ module cva6
     },
 
     localparam type lsu_ctrl_t = struct packed {
-      logic                             valid;
-      logic [CVA6Cfg.VLEN-1:0]          vaddr;
-      logic [31:0]                      tinst;
-      logic                             hs_ld_st_inst;
-      logic                             hlvx_inst;
-      logic                             overflow;
-      logic                             g_overflow;
-      logic [CVA6Cfg.XLEN-1:0]          data;
-      logic [(CVA6Cfg.XLEN/8)-1:0]      be;
-      fu_t                              fu;
-      fu_op                             operation;
-      logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;
+      logic                               valid;
+      logic [CVA6Cfg.VLEN-1:0]            vaddr;
+      logic [31:0]                        tinst;
+      logic                               hs_ld_st_inst;
+      logic                               hlvx_inst;
+      logic                               overflow;
+      logic                               g_overflow;
+      logic [CVA6Cfg.XLEN-1:0]            data;
+      logic [(CVA6Cfg.XLEN/8)-1:0]        be;
+      fu_t                                fu;
+      fu_op                               operation;
+      logic [CVA6Cfg.TRANS_ID_BITS-1:0]   trans_id;
+      logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_id;
     },
 
     localparam type fu_data_t = struct packed {
-      fu_t                              fu;
-      fu_op                             operation;
-      logic [CVA6Cfg.XLEN-1:0]          operand_a;
-      logic [CVA6Cfg.XLEN-1:0]          operand_b;
-      logic [CVA6Cfg.XLEN-1:0]          imm;
-      logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;
+      fu_t                                fu;
+      fu_op                               operation;
+      logic [CVA6Cfg.XLEN-1:0]            operand_a;
+      logic [CVA6Cfg.XLEN-1:0]            operand_b;
+      logic [CVA6Cfg.XLEN-1:0]            imm;
+      logic [CVA6Cfg.TRANS_ID_BITS-1:0]   trans_id;
+      logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_id;
     },
 
     localparam type icache_req_t = struct packed {
@@ -446,12 +448,14 @@ module cva6
   logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_id_ex;
   logic lsu_ready_ex_id;
   logic rollback_store_buffer;
-  logic lsu_rollback;
+  logic rollback_ex;
+  logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id;
   logic store_dispatched;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id;
 
 
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] load_trans_id_ex_id;
+  logic [CVA6Cfg.GlobalRsIdWidth-1:0] load_global_id_ex_id;
   logic [CVA6Cfg.XLEN-1:0] load_result_ex_id;
   logic load_valid_ex_id;
   exception_t load_exception_ex_id;
@@ -759,26 +763,31 @@ module cva6
   );
 
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] trans_id_ex_id;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] global_id_ex_id;
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata_ex_id;
   exception_t [CVA6Cfg.NrWbPorts-1:0] ex_ex_ex_id;  // exception from execute, ex_stage to id_stage
   logic [CVA6Cfg.NrWbPorts-1:0] wt_valid_ex_id;
 
   assign trans_id_ex_id[FLU_WB] = flu_trans_id_ex_id;
+  assign global_id_ex_id[FLU_WB] = '0;
   assign wbdata_ex_id[FLU_WB]   = flu_result_ex_id;
   assign ex_ex_ex_id[FLU_WB]    = flu_exception_ex_id;
   assign wt_valid_ex_id[FLU_WB] = flu_valid_ex_id;
 
   assign trans_id_ex_id[STORE_WB] = store_trans_id_ex_id;
+  assign global_id_ex_id[STORE_WB] = '0;
   assign wbdata_ex_id[STORE_WB]   = store_result_ex_id;
   assign ex_ex_ex_id[STORE_WB]    = store_exception_ex_id;
   assign wt_valid_ex_id[STORE_WB] = store_valid_ex_id;
 
   assign trans_id_ex_id[LOAD_WB] = load_trans_id_ex_id;
+  assign global_id_ex_id[LOAD_WB] = load_global_id_ex_id;
   assign wbdata_ex_id[LOAD_WB]   = load_result_ex_id;
   assign ex_ex_ex_id[LOAD_WB]    = load_exception_ex_id;
   assign wt_valid_ex_id[LOAD_WB] = load_valid_ex_id;
 
   assign trans_id_ex_id[FPU_WB] = fpu_trans_id_ex_id;
+  assign global_id_ex_id[FPU_WB] = '0;
   assign wbdata_ex_id[FPU_WB]   = fpu_result_ex_id;
   assign ex_ex_ex_id[FPU_WB]    = fpu_exception_ex_id;
   assign wt_valid_ex_id[FPU_WB] = fpu_valid_ex_id;
@@ -808,12 +817,14 @@ module cva6
     assign wbdata_ex_id[X_WB]   = x_result_ex_id;
     assign ex_ex_ex_id[X_WB]    = x_exception_ex_id;
     assign wt_valid_ex_id[X_WB] = x_valid_ex_id;
+    assign global_id_ex_id[X_WB] = '0;
   end else if (CVA6Cfg.EnableAccelerator) begin
     assign cvxif_req = '0;
     assign trans_id_ex_id[ACC_WB] = acc_trans_id_ex_id;
     assign wbdata_ex_id[ACC_WB]   = acc_result_ex_id;
     assign ex_ex_ex_id[ACC_WB]    = acc_exception_ex_id;
     assign wt_valid_ex_id[ACC_WB] = acc_valid_ex_id;
+    assign global_id_ex_id[ACC_WB] = '0;
   end else begin
     assign cvxif_req = '0;
   end
@@ -901,6 +912,7 @@ module cva6
       .issue_instr_hs_o        (issue_instr_hs_id_acc),
       // Commit
       .trans_id_i              (trans_id_ex_id),
+      .global_id_i             (global_id_ex_id),
       .resolved_branch_i       (resolved_branch),
       .wbdata_i                (wbdata_ex_id),
       .ex_ex_i                 (ex_ex_ex_id),
@@ -927,7 +939,8 @@ module cva6
       .rvfi_rs1_o             (rvfi_rs1),
       .rvfi_rs2_o             (rvfi_rs2),
       .rollback_store_buffer_o(rollback_store_buffer),
-      .rollback_lsu_bypass_o  (lsu_rollback),
+      .rollback_ex_o          (rollback_ex),
+      .rollback_trans_id_o    (rollback_trans_id),
       .store_dispatched_i     (store_dispatched),
       .store_dispatched_id_i  (store_dispatched_id),
       .rollback_en_o          (rollback_en_controller)
@@ -953,6 +966,8 @@ module cva6
   ) ex_stage_i (
       .clk_i(clk_i),
       .rst_ni(rst_ni),
+      .rollback_i(rollback_ex),
+      .rollback_trans_id_i(rollback_trans_id),
       .debug_mode_i(debug_mode),
       .flush_i(flush_ctrl_ex),
       .rs1_forwarding_i(rs1_forwarding_id_ex),
@@ -985,10 +1000,10 @@ module cva6
       // LSU
       .lsu_ready_o(lsu_ready_ex_id),
       .lsu_valid_i(lsu_valid_id_ex),
-      .lsu_rollback_i(lsu_rollback),
 
       .load_result_o   (load_result_ex_id),
       .load_trans_id_o (load_trans_id_ex_id),
+      .load_global_id_o(load_global_id_ex_id),
       .load_valid_o    (load_valid_ex_id),
       .load_exception_o(load_exception_ex_id),
 

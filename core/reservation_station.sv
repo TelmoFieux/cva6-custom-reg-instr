@@ -448,8 +448,8 @@ module reservation_station
       is_result_available_gpr_q <= '1;
     end else begin
       rs_q <= rs_n;
-      // lsu_used_q <= lsu_used_n;
-      lsu_used_q <= '0;
+      lsu_used_q <= lsu_used_n;
+      //lsu_used_q <= '0;
       is_result_available_gpr_q <= is_result_available_gpr_n;
       if (FPR_ENABLED) begin
         is_result_available_fpr_q <= is_result_available_fpr_n;

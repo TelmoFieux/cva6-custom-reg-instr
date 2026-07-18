@@ -128,6 +128,8 @@ module issue_stage
     output logic issue_instr_hs_o,
     // Transaction ID - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] trans_id_i,
+    // Global ID - EX_STAGE
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] global_id_i,
     // Result from branch unit - EX_STAGE
     input bp_resolve_t resolved_branch_i,
     // Results to write back - EX_STAGE
@@ -175,7 +177,9 @@ module issue_stage
     // is rollbacked instr a store - STORE_BUFFER
     output logic                                              rollback_store_buffer_o,
     // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
-    output logic                                         rollback_lsu_bypass_o,
+    output logic                                         rollback_ex_o,
+    // rollback trans id - EX_STAGE
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]             rollback_trans_id_o,
     // Has a store been dispatched ? - STORE_UNIT
     input logic store_dispatched_i,
     // Store dispatched trans_id - STORE_UNIT
@@ -692,6 +696,7 @@ module issue_stage
       .issue_ack_i             (issue_instr_ack),
       .resolved_branch_i       (resolved_branch_i),
       .trans_id_i              (trans_id_i),
+      .global_id_i             (global_id_i),
       .wbdata_i                (wbdata_i),
       .ex_i                    (ex_ex_i),
       .wt_valid_i,
@@ -710,7 +715,8 @@ module issue_stage
       .rollback_op_o           (rollback_op_i),
       .rollback_we_o           (rollback_we_i),
       .rollback_store_buffer_o,
-      .rollback_lsu_bypass_o,
+      .rollback_ex_o,
+      .rollback_trans_id_o,
       .store_dispatched_i,
       .store_dispatched_id_i,
       .rollback_arch_rd_o      (rollback_arch_rd_i),
