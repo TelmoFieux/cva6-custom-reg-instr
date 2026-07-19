@@ -511,15 +511,12 @@ package ariane_pkg;
     FCMOV
   } fu_op;
 
-  // list of all RS needed
-  // Basically 1 per physical unit
-  // except for fpu and ALU2 wich share the
-  // same Wb port
+  // list of all RS instantiated
   typedef enum logic [3:0] {
     FLU,
     LOAD_STORE,
     FPU_ALU2,
-    F_ACCEL, // not allowed yet on superscalar
+    // F_ACCEL, not allowed yet on superscalar mode
     F_CVXIF
   } fu_phys;
 
@@ -530,11 +527,19 @@ package ariane_pkg;
     endcase
   endfunction
 
-  // does reservation station of one unit needs to keep track of fpr
-  function automatic logic is_fpr_used(input fu_phys fu);
-    unique case (fu) inside
-      FLU, LOAD_STORE: return 1'b0;
-      default:         return 1'b1;  // all other fu
+  // Returns the size of each RS
+  function automatic int unsigned rs_size(input fu_phys phys);
+    unique case (phys)
+      FLU:  return 2;
+      LOAD_STORE: return 4;
+      FPU_ALU2: return 2;
+      F_CVXIF: return 1;
+      default: begin
+        // pragma translate_off
+        $fatal(1, "Invalid RS supplied");
+        // pragma translate_on
+        return 0;
+      end
     endcase
   endfunction
 

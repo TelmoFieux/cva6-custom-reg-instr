@@ -32,6 +32,7 @@ module reservation_station
     parameter int unsigned           NR_RS_ENTRIES = 4,
     parameter int unsigned           FPR_ENABLED   = 0,
     parameter int unsigned           LSU_EN        = 0, // does this RS contains LOAD or STORE instr
+    parameter int unsigned           CSR_EN        = 0, // does this RS contains CSR instr
     parameter type scoreboard_entry_t = logic
 ) (
     input  logic                                                         clk_i,
@@ -132,26 +133,31 @@ module reservation_station
       .winner_valid_o (winner_valid_o)
   );
 
-  tournament_tree #(
-      .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
-      .NR_PLAYER(NR_RS_ENTRIES)
-    ) i_tournament_tree_oldest (
-      .valid_i    (tournament_oldest_valid),
-      .seq_num_i  (tournament_seq_num),
-      .id_i       (tournament_id),
-      .winner_o   (winner_oldest_o),
-      .winner_valid_o ()
-  );
+  // returns the oldest instr wheather it's valid or not
+  if (CSR_EN) begin
+    tournament_tree #(
+        .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
+        .NR_PLAYER(NR_RS_ENTRIES)
+      ) i_tournament_tree_oldest (
+        .valid_i    (tournament_oldest_valid),
+        .seq_num_i  (tournament_seq_num),
+        .id_i       (tournament_id),
+        .winner_o   (winner_oldest_o),
+        .winner_valid_o ()
+    );
+  end
 
   if (LSU_EN) begin
     // now that we have the oldest one we check it's validity
     assign decoded_instr_valid_o = (lsu_used_q && !wb_valid_i[STORE_WB] && !wb_valid_i[LOAD_WB]) ? 1'b0 : rs_q.free_entries[winner_o] == 1'b0 ?
         (rs_q.valid_regs[winner_o] == '1 ? 1'b1 : 1'b0)
       : 1'b0;
-  end else begin
+  end else if (CSR_EN) begin
     assign decoded_instr_valid_o = rs_q.rs_table[winner_o].fu == CSR ?
         (winner_valid_o && rs_q.valid_regs[winner_o] == '1 && rs_q.rs_table[winner_o] == rs_q.rs_table[winner_oldest_o])
       : winner_valid_o ;
+  end else begin
+    assign decoded_instr_valid_o = winner_valid_o;
   end
 
   assign decoded_instr_o = rs_q.rs_table[winner_o];

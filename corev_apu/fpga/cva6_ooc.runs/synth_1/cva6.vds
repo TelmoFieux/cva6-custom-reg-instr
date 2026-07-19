@@ -1,0 +1,47 @@
+#-----------------------------------------------------------
+# Vivado v2024.1 (64-bit)
+# SW Build 5076996 on Wed May 22 18:36:09 MDT 2024
+# IP Build 5075265 on Wed May 22 21:45:21 MDT 2024
+# SharedData Build 5076995 on Wed May 22 18:29:18 MDT 2024
+# Start of session at: Sun Jul 19 01:10:44 2026
+# Process ID: 33218
+# Current directory: /home/telmo/Desktop/TER/cva6-custom-reg-instr/corev_apu/fpga/cva6_ooc.runs/synth_1
+# Command line: vivado -log cva6.vds -product Vivado -mode batch -messageDb vivado.pb -notrace -source cva6.tcl
+# Log file: /home/telmo/Desktop/TER/cva6-custom-reg-instr/corev_apu/fpga/cva6_ooc.runs/synth_1/cva6.vds
+# Journal file: /home/telmo/Desktop/TER/cva6-custom-reg-instr/corev_apu/fpga/cva6_ooc.runs/synth_1/vivado.jou
+# Running On        :telmo-HYM-WXX
+# Platform          :Ubuntu
+# Operating System  :Ubuntu 20.04.6 LTS
+# Processor Detail  :AMD Ryzen 5 5600H with Radeon Graphics
+# CPU Frequency     :1200.000 MHz
+# CPU Physical cores:6
+# CPU Logical cores :12
+# Host memory       :16079 MB
+# Swap memory       :2147 MB
+# Total Virtual     :18227 MB
+# Available Virtual :11593 MB
+#-----------------------------------------------------------
+source cva6.tcl -notrace
+Command: synth_design -top cva6 -part xc7z020clg400-1 -global_retiming on -mode out_of_context
+Starting synth_design
+Attempting to get a license for feature 'Synthesis' and/or device 'xc7z020'
+INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7z020'
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 4 processes.
+INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
+INFO: [Synth 8-7075] Helper process launched with PID 33225
+---------------------------------------------------------------------------------
+Starting Synthesize : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 1803.379 ; gain = 387.777 ; free physical = 186 ; free virtual = 10064
+---------------------------------------------------------------------------------
+ERROR: [Synth 8-9123] an enum variable may only be assigned the same enum typed variable or one of its values [/home/telmo/Desktop/TER/cva6-custom-reg-instr/core/cvfpu/src/fpnew_fma.sv:490]
+INFO: [Synth 8-10285] module 'fpnew_fma' is ignored due to previous errors [/home/telmo/Desktop/TER/cva6-custom-reg-instr/core/cvfpu/src/fpnew_fma.sv:742]
+INFO: [Synth 8-9084] Verilog file '/home/telmo/Desktop/TER/cva6-custom-reg-instr/core/cvfpu/src/fpnew_fma.sv' ignored due to errors
+ERROR: [Synth 8-439] module 'cva6' not found
+---------------------------------------------------------------------------------
+Finished Synthesize : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 1887.316 ; gain = 471.715 ; free physical = 177 ; free virtual = 9972
+---------------------------------------------------------------------------------
+synthesize failed
+INFO: [Common 17-83] Releasing license: Synthesis
+7 Infos, 0 Warnings, 0 Critical Warnings and 3 Errors encountered.
+synth_design failed
+ERROR: [Common 17-69] Command failed: Vivado Synthesis failed
+INFO: [Common 17-206] Exiting Vivado at Sun Jul 19 01:10:54 2026...

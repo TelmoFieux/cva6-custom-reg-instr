@@ -430,9 +430,7 @@ module issue_stage
   // 2. Manage instructions in reservation stations
   // ---------------------------------------------------------
 
-  localparam int unsigned NR_WB = 5;
-  // localparam int unsigned RS_SIZE = CVA6Cfg.NR_SB_ENTRIES / (NR_WB -1); //NR_WB -1 because ACCEL and CVXIF are incompatible
-  localparam int unsigned RS_SIZE = 8;
+  localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -451,7 +449,6 @@ module issue_stage
     localparam logic is_rs_instanciated =
         (fu == FPU_ALU2) ? (CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent) :
         (fu == F_CVXIF)  ? CVA6Cfg.CvxifEn :
-        (fu == F_ACCEL)  ? 1'b0 : //not yet supported in superscalar mode
         1'b1;
 
     if (is_rs_instanciated) begin : rs_instance
@@ -504,11 +501,13 @@ module issue_stage
 
       // if fpu not activated then only alu2 will use the FPU wb port
       // so no need to check for fpr register dependency
+      // By default cvxif will not check fpr dependency
       localparam logic en_fpr =
-        (fu == FPU_ALU2) ? (CVA6Cfg.FpPresent) :
-        is_fpr_used(fu);
+        ((fu == FPU_ALU2 || fu == LOAD_STORE) && CVA6Cfg.FpPresent) ? 1'b1 : 1'b0;
 
       localparam logic en_lsu = fu == LOAD_STORE;
+
+      localparam logic en_csr = fu == FLU;
 
         for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
           assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j] & (!flush_unissued_instr_i && !flush_i);
@@ -539,9 +538,10 @@ module issue_stage
         .DATA_WIDTH         (CVA6Cfg.XLEN),
         .NR_READ_PORTS      (NR_READ_PORTS),
         .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
-        .NR_RS_ENTRIES      (RS_SIZE),
+        .NR_RS_ENTRIES      (rs_size(fu)),
         .FPR_ENABLED        (en_fpr),
         .LSU_EN             (en_lsu),
+        .CSR_EN             (en_csr),
         .scoreboard_entry_t (scoreboard_entry_t)
       ) i_reservation_station (
         .clk_i                  (clk_i),

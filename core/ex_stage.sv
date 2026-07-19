@@ -426,6 +426,7 @@ module ex_stage
   generate
     if (CVA6Cfg.FpPresent) begin : fpu_gen
       fu_data_t fpu_data;
+      logic fpu_ready, fpu_early_valid;
       always_comb begin
         fpu_data = fpu_valid_i[0] ? fu_data_i[0] : '0;
         if (CVA6Cfg.SuperscalarEn) begin
@@ -434,6 +435,8 @@ module ex_stage
           end
         end
       end
+
+      assign fpu_ready_o = fpu_ready && !fpu_early_valid;
 
       fpu_wrap #(
           .CVA6Cfg(CVA6Cfg),
@@ -444,7 +447,8 @@ module ex_stage
           .rst_ni,
           .flush_i,
           .fpu_valid_i(|fpu_valid_i),
-          .fpu_ready_o,
+          .fpu_ready_o(fpu_ready),
+          .fpu_early_valid_o(fpu_early_valid),
           .fu_data_i(fpu_data),
           .fpu_fmt_i,
           .fpu_rm_i,
