@@ -26,6 +26,10 @@ module serdiv
     input logic clk_i,
     // Asynchronous reset active low - SUBSYSTEM
     input logic rst_ni,
+    // Rollback - SCOREBOARD
+    input  logic rollback_i,
+    // Rollback trans ID - SCOREBOARD
+    input  logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
     // Serdiv translation ID - Mult
     input logic [CVA6Cfg.TRANS_ID_BITS-1:0] id_i,
     // A operand - Mult
@@ -222,6 +226,15 @@ module serdiv
       b_reg_en = 1'b0;
       load_en  = 1'b0;
       state_d  = IDLE;
+      out_vld_o = 1'b0;
+    end
+
+    if (rollback_i && state_q != IDLE && id_q == rollback_trans_id_i) begin
+      a_reg_en  = 1'b0;
+      b_reg_en  = 1'b0;
+      load_en   = 1'b0;
+      state_d   = IDLE;
+      out_vld_o = 1'b0;
     end
   end
 

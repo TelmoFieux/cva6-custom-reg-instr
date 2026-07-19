@@ -34,7 +34,7 @@ dpi-library    ?= work-dpi
 # Top level module to compile
 top_level      ?= ariane_tb
 # Maximum amount of cycles for a successful simulation run
-max_cycles     ?= 1000000000
+max_cycles     ?= 10000000
 # Test case to run
 test_case      ?= core_test
 # QuestaSim Version
@@ -358,8 +358,15 @@ check-benchmarks:
 benchmark:
 	cd sw/app && make $(APP).mem && make $(APP).coe
 
+# Règle pour compiler les fichiers objets (.o) à partir des sources C++
+$(dpi-library)/%.o: corev_apu/tb/dpi/%.cc $(dpi_hdr)
+	mkdir -p $(dpi-library)
+	$(CXX) -c -fPIC -std=c++17 $(CFLAGS) -o $@ $<
 
-
+# Règle pour lier les objets et générer la librairie partagée (.so)
+$(dpi-library)/ariane_dpi.so: $(dpi)
+	mkdir -p $(dpi-library)
+	$(CXX) -shared -m64 -fPIC -std=c++17 -Bsymbolic -o $@ $^
 
 #####################################
 # xrun-specific commands, variables

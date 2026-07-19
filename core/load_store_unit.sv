@@ -47,11 +47,17 @@ module load_store_unit
     output logic lsu_ready_o,
     // Load Store Unit instruction is valid - ISSUE_STAGE
     input logic lsu_valid_i,
+    // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
+    input logic lsu_rollback_i,
+    // trans if of instruction to rollback - SCOREBOARD
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] lsu_rollback_trans_id_i,
 
     // Load transaction ID - ISSUE_STAGE
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0] load_trans_id_o,
     // Load result - ISSUE_STAGE
     output logic [CVA6Cfg.XLEN-1:0] load_result_o,
+    // Load Global ID - ISSUE_STAGE
+    output logic [CVA6Cfg.GlobalRsIdWidth-1:0] load_global_id_o,
     // Load result is valid - ISSUE_STAGE
     output logic load_valid_o,
     // Load exception - ISSUE_STAGE
@@ -65,6 +71,13 @@ module load_store_unit
     output logic store_valid_o,
     // Store exception - ISSUE_STAGE
     output exception_t store_exception_o,
+    // do we need to rollback the store buffer - SCOREBOARD
+    input logic store_rollback_i,
+    // Has a store been dispatched ? - SCOREBOARD
+    output logic store_dispatched_o,
+    // Store dispatched trans_id - SCOREBOARD
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_o,
+
 
     // Commit the first pending store - TO_BE_COMPLETED
     input logic commit_i,
@@ -218,6 +231,7 @@ module load_store_unit
 
   logic                                     ld_valid;
   logic         [CVA6Cfg.TRANS_ID_BITS-1:0] ld_trans_id;
+  logic       [CVA6Cfg.GlobalRsIdWidth-1:0] ld_global_id;
   logic         [         CVA6Cfg.XLEN-1:0] ld_result;
   logic                                     st_valid;
   logic         [CVA6Cfg.TRANS_ID_BITS-1:0] st_trans_id;
@@ -407,7 +421,9 @@ module load_store_unit
       .stall_st_pending_i,
       .no_st_pending_o,
       .store_buffer_empty_o(store_buffer_empty),
-
+      .store_buffer_rollback_i(store_rollback_i),
+      .store_dispatched_o,
+      .store_dispatched_id_o,
       .valid_i   (st_valid_i),
       .lsu_ctrl_i(lsu_ctrl),
       .pop_st_o  (pop_st),
@@ -456,9 +472,12 @@ module load_store_unit
       .valid_i   (ld_valid_i),
       .lsu_ctrl_i(lsu_ctrl),
       .pop_ld_o  (pop_ld),
+      .rollback_i        (lsu_rollback_i),
+      .rollback_trans_id_i  (lsu_rollback_trans_id_i),
 
       .valid_o              (ld_valid),
       .trans_id_o           (ld_trans_id),
+      .global_id_o          (ld_global_id),
       .result_o             (ld_result),
       .ex_o                 (ld_ex),
       // MMU port
@@ -490,13 +509,13 @@ module load_store_unit
   // can be tuned to trade-off IPC vs. cycle time
 
   shift_reg #(
-      .dtype(logic [$bits(ld_valid) + $bits(ld_trans_id) + $bits(ld_result) + $bits(ld_ex) - 1:0]),
+      .dtype(logic [$bits(ld_valid) + $bits(ld_trans_id) + $bits(ld_result) + $bits(ld_ex) + $bits(ld_global_id) - 1:0]),
       .Depth(CVA6Cfg.NrLoadPipeRegs)
   ) i_pipe_reg_load (
       .clk_i,
       .rst_ni,
-      .d_i({ld_valid, ld_trans_id, ld_result, ld_ex}),
-      .d_o({load_valid_o, load_trans_id_o, load_result_o, load_exception_o})
+      .d_i({ld_valid, ld_trans_id, ld_result, ld_ex, ld_global_id}),
+      .d_o({load_valid_o, load_trans_id_o, load_result_o, load_exception_o, load_global_id_o})
   );
 
   shift_reg #(
@@ -746,7 +765,8 @@ module load_store_unit
     be_i,
     fu_data_i.fu,
     fu_data_i.operation,
-    fu_data_i.trans_id
+    fu_data_i.trans_id,
+    fu_data_i.global_id
   };
 
   lsu_bypass #(
@@ -756,6 +776,8 @@ module load_store_unit
       .clk_i,
       .rst_ni,
       .flush_i,
+      .rollback_en_i  (lsu_rollback_i),
+      .rollback_trans_id_i(lsu_rollback_trans_id_i),
       .lsu_req_i      (lsu_req_i),
       .lsu_req_valid_i(lsu_valid_i),
       .pop_ld_i       (pop_ld),

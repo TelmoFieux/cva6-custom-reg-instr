@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2020 Thales.
-# 
+#
 # Copyright and related rights are licensed under the Apache
 # License, Version 2.0 (the "License"); you may not use this file except in
 # compliance with the License.  You may obtain a copy of the License at
@@ -20,7 +20,7 @@
 # Project Name:   CVA6 softcore
 # Language:       Python
 #
-# Description:    Script to generate mem data file for simulation from binary 
+# Description:    Script to generate mem data file for simulation from binary
 #                 application file.
 #
 # =========================================================================== #
@@ -41,7 +41,7 @@ if(len(sys.argv) < 2):
     print ("Usage mem2coe.py FILENAME")
     quit()
 
-filename = sys.argv[1].removesuffix('.mem') + ".coe"
+filename = sys.argv[1][:-4] + ".coe"
 
 mem_file  = open(filename,    'wb')
 mem_file.write(b"MEMORY_INITIALIZATION_RADIX=16;\n")
@@ -60,7 +60,7 @@ with open(sys.argv[1], "rb") as f:
     	#mem_file.write(mem_read)
     	#mem_file.write(",\n" mem_read)
 	#mem_read = f.readline()
-    
+
 ###############################################################################
 # close all files
 ###############################################################################

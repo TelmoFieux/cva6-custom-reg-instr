@@ -48,7 +48,9 @@ bmarks = \
 	helloworld_printf \
 	mnist \
 	fft \
-	test_cmov
+	test_cmov \
+	bench_alu \
+	bench_alu_ILP
 
 #--------------------------------------------------------------------
 # Build rules
@@ -87,7 +89,6 @@ CFLAGS  ?=	-march=rv32im_zicsr \
 		-DPREALLOCATE=1 \
 		-fvisibility=hidden \
 		-DSTDIO_THRU_UART \
-		-O3 \
 		-mcmodel=medany \
 		-fno-tree-loop-distribute-patterns\
 		-funroll-all-loops \
@@ -95,7 +96,9 @@ CFLAGS  ?=	-march=rv32im_zicsr \
 		-falign-functions=16 \
 		-static \
 		-Wall \
-		-pedantic
+		-pedantic \
+		-Wno-error=int-conversion \
+		-Wno-error=incompatible-pointer-types
 
 RISCV_CFLAGS :=-DPERFORMANCE_RUN=1 \
 		-DITERATIONS=3 \
@@ -105,7 +108,6 @@ RISCV_CFLAGS :=-DPERFORMANCE_RUN=1 \
 		-DPREALLOCATE=1 \
 		-fvisibility=hidden \
 		-DSTDIO_THRU_UART \
-		-O3 \
 		-mcmodel=medany \
 		-fno-tree-loop-distribute-patterns\
 		-funroll-all-loops \
@@ -113,7 +115,9 @@ RISCV_CFLAGS :=-DPERFORMANCE_RUN=1 \
 		-falign-functions=16 \
 		-static \
 		-Wall \
-		-pedantic
+		-pedantic \
+		-Wno-error=int-conversion \
+		-Wno-error=incompatible-pointer-types
 
 
 RISCV_LDFLAGS=-L./ -lcva6 -static -nostartfiles -T $(src_dir)/../bsp/config/link.ld

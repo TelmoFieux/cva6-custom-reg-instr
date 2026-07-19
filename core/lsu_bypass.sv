@@ -35,6 +35,10 @@ module lsu_bypass
     input logic rst_ni,
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     input logic flush_i,
+    // do we need to rollback the lsu bypass buffer ? - SCOREBOARD
+    input logic rollback_en_i,
+    // rollback trans id - SCOREBOARD
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
 
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     input lsu_ctrl_t lsu_req_i,
@@ -99,6 +103,17 @@ module lsu_bypass
       read_pointer = '0;
       mem_n = '0;
     end
+
+    if (rollback_en_i && !pop_ld_i && !pop_st_i) begin
+      automatic logic prev_write_ptr;
+      prev_write_ptr = write_pointer_q - 1'b1;
+      if (mem_q[prev_write_ptr].valid && mem_q[prev_write_ptr].trans_id == rollback_trans_id_i) begin
+        write_pointer = prev_write_ptr;
+        mem_n[prev_write_ptr].valid = 1'b0;
+        status_cnt--;
+      end
+    end
+
     // default assignments
     read_pointer_n  = read_pointer;
     write_pointer_n = write_pointer;

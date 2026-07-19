@@ -11,20 +11,7 @@
 //
 // Engineer:       Fieux Telmo - fieuxtelmo@gmail.com
 //
-// Additional contributions by:
-//                 Markus Wegmann - markus.wegmann@technokrat.ch
-//                 Noam Gallmann - gnoam@live.com
-//                 Felipe Lisboa Malaquias
-//                 Henry Suzukawa
-//                 Angela Gonzalez - PlanV Technologies
-//
 // Description:    This register file is optimized for implementation on
-//                 FPGAs. The register file features one distributed RAM block per implemented
-//                 sync-write port, each with a parametrized number of async-read ports.
-//                 Read-accesses are multiplexed from the relevant block depending on which block
-//                 was last written to. For that purpose an additional array of registers is
-//                 maintained keeping track of write acesses.
-//
 
 module register_allocation_table
   import ariane_pkg::*;
@@ -39,6 +26,7 @@ module register_allocation_table
 ) (
     input logic                                               clk_i,
     input logic                                               rst_ni,
+    output logic[CVA6Cfg.NrIssuePorts-1:0]                    empty_o,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    we_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    commit_valid_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_rd_i,
@@ -46,7 +34,7 @@ module register_allocation_table
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_new_phys_i,
     input logic [ADDR_WIDTH-1:0]                              rollback_rd_i, // architectural register to rollback
-    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // architectural register to rollback
+    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // physical register to rollback
     input logic                                               rollback_we_i, // rollback is enabled
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i, //May be unnecessary to pass the entirety of the struct scoreboard_entry_t
@@ -61,8 +49,10 @@ module register_allocation_table
   localparam NUM_REG = 2 ** ADDR_WIDTH;
 
   //keeps track of free physical registers
-  logic [NUM_REG-1:0] free_regs_masked [CVA6Cfg.NrIssuePorts:0];
-  logic [ADDR_WIDTH-1:0] alloc_idx     [CVA6Cfg.NrIssuePorts-1:0];
+  logic [CVA6Cfg.NrIssuePorts:0][NUM_REG-1:0] free_regs_masked;
+  logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0] alloc_idx;
+  logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
+
 
   assign free_regs_masked[0] = rat_q.free_regs;
 
@@ -74,16 +64,19 @@ module register_allocation_table
       i_lzc (
           .in_i   (free_regs_masked[i]),
           .cnt_o  (alloc_idx[i]),
-          .empty_o()
+          .empty_o(empty_mask[i])
       );
 
-      assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) ?
+      assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_o) ?
         (free_regs_masked[i] & ~(NUM_REG'(1) << alloc_idx[i])) :
         free_regs_masked[i];
   end
 
+  assign empty_o = empty_mask;
+
   // RAT of size nb register i.e 32 containing adress of physical register
   rat_table_t rat_n, rat_q;
+  logic raw_rs1, raw_rs2, raw_rs3;
 
   always_comb begin : renaming
     rat_n = rat_q;
@@ -93,22 +86,33 @@ module register_allocation_table
       renamed_instr_o[i].arch_rd = decoded_instr_i[i].rd;
 
       // Renaming destination
-      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
-        renamed_instr_o[i].old_phys = rat_q.rat[decoded_instr_i[i].rd];
-        renamed_instr_o[i].rd          = alloc_idx[i];
+      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_o) begin
+        //check WAW hazard
+        if (i > 0 && we_i[i-1] && decoded_instr_ack_i[i-1] &&
+            decoded_instr_i[i].rd == decoded_instr_i[i-1].rd) begin
+            renamed_instr_o[i].old_phys = alloc_idx[i-1];
+        end else begin
+            renamed_instr_o[i].old_phys = rat_q.rat[decoded_instr_i[i].rd];
+        end
+        renamed_instr_o[i].rd = alloc_idx[i];
       end else begin
         renamed_instr_o[i].old_phys = decoded_instr_i[i].rd;
       end
 
       // Renaming sources. In case of superscalar config, we check RAW hazard.
       // Current method only work up to 2 issue port
+
+      raw_rs1 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].rs1 == decoded_instr_i[i-1].rd);
+      raw_rs2 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].rs2 == decoded_instr_i[i-1].rd);
+
       renamed_instr_o[i].rs1 = (i == 0) ? rat_q.rat[decoded_instr_i[i].rs1] :
-        decoded_instr_i[i].rs1 != decoded_instr_i[i-1].rd ? rat_q.rat[decoded_instr_i[i].rs1] : alloc_idx[i-1];
+                               raw_rs1  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].rs1];
       renamed_instr_o[i].rs2 = (i == 0) ? rat_q.rat[decoded_instr_i[i].rs2] :
-        decoded_instr_i[i].rs2 != decoded_instr_i[i-1].rd ? rat_q.rat[decoded_instr_i[i].rs2] : alloc_idx[i-1];
+                               raw_rs2  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].rs2];
       if (NR_READ_PORTS == 3 && !decoded_instr_i[i].use_imm) begin
+        raw_rs3 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].result == decoded_instr_i[i-1].rd);
         renamed_instr_o[i].result = (i == 0) ? rat_q.rat[decoded_instr_i[i].result] :
-          decoded_instr_i[i].result != decoded_instr_i[i-1].rd ? rat_q.rat[decoded_instr_i[i].result] : alloc_idx[i-1];
+                                    raw_rs3  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].result];
       end
     end
 
@@ -116,32 +120,39 @@ module register_allocation_table
     if (!rat_restore_en_i) begin
       rat_n.free_regs = free_regs_masked[CVA6Cfg.NrIssuePorts];
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        if (commit_valid_i[i] && ((is_rd_fpr(commit_op_i) && FPR_RAT==1'b1) || (!is_rd_fpr(commit_op_i) && FPR_RAT==1'b0))) begin
-          rat_n.free_regs[commit_old_phys_i[i]] = 1'b1; //freeing old reg
-          //locking new reg. Useless for issue rat but necessary for commit rat
-          rat_n.free_regs[commit_new_phys_i[i]] = 1'b0;
-          if (COMMIT_RAT == 1'b1 && commit_rd_i[i] != '0) begin
-            rat_n.rat[commit_rd_i[i]] = commit_new_phys_i[i];
+        if (commit_valid_i[i] && ((is_rd_fpr(commit_op_i[i]) && FPR_RAT==1'b1) || (!is_rd_fpr(commit_op_i[i]) && FPR_RAT==1'b0))) begin
+          if (FPR_RAT || commit_rd_i[i] != '0) begin
+            rat_n.free_regs[commit_old_phys_i[i]] = 1'b1; //freeing old reg
+            rat_n.free_regs[commit_new_phys_i[i]] = 1'b0; //locking new reg
+
+            if (COMMIT_RAT == 1'b1) begin
+              rat_n.rat[commit_rd_i[i]] = commit_new_phys_i[i];
+            end
           end
         end
 
 
       end
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
+        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_o) begin
           rat_n.rat[decoded_instr_i[i].rd] = alloc_idx[i];
         end
       end
     end
 
     //rollback
-    if(rollback_we_i) begin
+    if (rollback_we_i && (FPR_RAT || rollback_rd_i != '0)) begin
       rat_n.free_regs[rat_n.rat[rollback_rd_i]] = 1'b1;
       rat_n.rat[rollback_rd_i] = rollback_old_phys_i;
     end
 
     if (rat_restore_en_i) begin
       rat_n = rat_restore_state_i;
+    end
+
+    // never rename r0 in gpr
+    if (!FPR_RAT) begin
+      rat_n.free_regs[0]=1'b0;
     end
   end
 

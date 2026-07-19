@@ -34,6 +34,12 @@ module store_unit
     output logic no_st_pending_o,
     // Store buffer is empty - TO_BE_COMPLETED
     output logic store_buffer_empty_o,
+    // do we need to rollback the store buffer - SCOREBOARD
+    input logic store_buffer_rollback_i,
+    // Has a store been dispatched ? - SCOREBOARD
+    output logic store_dispatched_o,
+    // Store dispatched trans_id - SCOREBOARD
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_o,
     // Store instruction is valid - ISSUE_STAGE
     input logic valid_i,
     // Data input - ISSUE_STAGE
@@ -284,6 +290,10 @@ module store_unit
 
   assign st_ready = store_buffer_ready & amo_buffer_ready;
 
+  // rollback signals
+  assign store_dispatched_o = store_buffer_valid;
+  assign store_dispatched_id_o = trans_id_o;
+
   // ---------------
   // Store Queue
   // ---------------
@@ -295,6 +305,7 @@ module store_unit
       .clk_i,
       .rst_ni,
       .flush_i,
+      .rollback_en_i (store_buffer_rollback_i),
       .stall_st_pending_i,
       .no_st_pending_o,
       .store_buffer_empty_o,

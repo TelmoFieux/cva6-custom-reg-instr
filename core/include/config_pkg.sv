@@ -151,6 +151,8 @@ package config_pkg;
     int unsigned                 AxiIdWidth;
     // Reg address width
     int unsigned                 RegAddrWidth;
+    // Width of gobal reservation station id used to track age
+    int unsigned                 GlobalRsIdWidth;
     // AXI User width
     int unsigned                 AxiUserWidth;
     // AXI burst in write
@@ -249,6 +251,7 @@ package config_pkg;
     int unsigned AxiIdWidth;
     int unsigned AxiUserWidth;
     int unsigned RegAddrWidth;
+    int unsigned GlobalRsIdWidth;
     int unsigned MEM_TID_WIDTH;
     int unsigned NrLoadBufEntries;
     bit          RVF;

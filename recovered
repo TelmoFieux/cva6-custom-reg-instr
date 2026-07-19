@@ -1,0 +1,200 @@
+// Copyright 2018 ETH Zurich and University of Bologna.
+// Copyright 2024 - PlanV Technologies for additionnal contribution.
+// Copyright and related rights are licensed under the Solderpad Hardware
+// License, Version 0.51 (the "License"); you may not use this file except in
+// compliance with the License.  You may obtain a copy of the License at
+// http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law
+// or agreed to in writing, software, hardware and materials distributed under
+// this License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+// CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations under the License.
+//
+// Engineer:       Fieux Telmo - fieuxtelmo@gmail.com
+//
+// Additional contributions by:
+//                 Markus Wegmann - markus.wegmann@technokrat.ch
+//                 Noam Gallmann - gnoam@live.com
+//                 Felipe Lisboa Malaquias
+//                 Henry Suzukawa
+//                 Angela Gonzalez - PlanV Technologies
+//
+// Description:    This register file is optimized for implementation on
+
+
+
+module reservation_station
+  import ariane_pkg::*;
+#(
+    parameter config_pkg::cva6_cfg_t CVA6Cfg       = config_pkg::cva6_cfg_empty,
+    parameter int unsigned           DATA_WIDTH    = 32,
+    parameter int unsigned           NR_READ_PORTS = 2,
+    parameter int unsigned           ADDR_WIDTH    = 5,
+    parameter int unsigned           NR_RS_ENTRIES = 4,
+    parameter type scoreboard_entry_t = logic
+    input logic                                               clk_i,
+    input logic                                               rst_ni,
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                    we_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                    commit_valid_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_rd_i,
+    input fu_op [CVA6Cfg.NrIssuePorts-1:0]                    commit_op_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
+    input logic [ADDR_WIDTH-1:0]                              rollback_rd_i, // architectural register to rollback
+    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // architectural register to rollback
+    input logic                                               rollback_we_i, // rollback is enabled
+
+    input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
+    input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
+    output scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_o, //instructions found ready
+    input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_o, //is instruction valid
+);
+
+  localparam NUM_REG = 2 ** ADDR_WIDTH;
+
+  typedef struct packed {
+    scoreboard_entry_t [NR_RS_ENTRIES-1:0] rs_table;
+    logic [NR_RS_ENTRIES-1:0] free_regs;
+    logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
+    //logic [NR_RS_ENTRIES-1:0][ADDR_WIDTH-1:0] regs_required;
+  } reservation_station_t;
+
+  logic [NUM_REG-1:0] is_result_available_gpr_n, is_result_available_gpr_q;
+
+  //fp operation might use gpr regs. So we need to keep track of both
+  //fpr and gpr dependencies
+  if (CVA6Cfg.FpPresent) begin
+    logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
+  end
+
+  logic [NR_RS_ENTRIES-1:0] free_regs_masked [CVA6Cfg.NrIssuePorts:0];
+  logic [$clog2(NR_RS_ENTRIES):0] alloc_idx    [CVA6Cfg.NrIssuePorts-1:0];
+
+  assign free_regs_masked[0] = rs_q.free_regs;
+
+  //priority encoder cascade to get free index in RS
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
+      lzc #(
+          .WIDTH(NUM_REG),
+          .MODE(1'b0))
+      i_lzc (
+          .in_i   (free_regs_masked[i]),
+          .cnt_o  (alloc_idx[i]),
+          .empty_o()
+      );
+
+      assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) ?
+        (free_regs_masked[i] & ~(NR_RS_ENTRIES'(1) << alloc_idx[i])) :
+        free_regs_masked[i];
+  end
+
+  logic [NR_RS_ENTRIES-1:0] tournament_valid;
+  logic [NR_RS_ENTRIES-1:0] tournament_seq_num;
+
+  for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
+    assign tournament_valid[i] = rs_q.valid_regs[i] == '1 ? 1'b1 : 1'b0;
+    assign tournament_seq_num[i] = rs_q.rs_table[i].
+  end
+
+  tournament_tree #(
+      .ID_SIZE(NUM_REG),
+      .NR_PLAYER(1'b0))
+  i_tournament_tree (
+      .valid_i   (tournament_valid),
+      .seq_num_i  (alloc_idx[i]),
+      .id_i(),
+      .winner_o,
+      .winner_valid_o
+  );
+
+  assign decoded_instr_o = rs_q.rs_table[winner_o];
+  assign decoded_instr_valid_o = winner_valid_o;
+
+  reservation_station_t rs_n, rs_q;
+
+  always_comb begin : updating_rs
+    rs_n = rs_q;
+    is_result_available_gpr_n = is_result_available_gpr_q;
+
+    if (CVA6Cfg.FpPresent) begin
+      is_result_available_fpr_n = is_result_available_fpr_q;
+    end
+
+    if (CVA6Cfg.FpPresent) begin
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0)) begin
+        rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
+        if (CVA6Cfg.FpPresent) begin
+          if (is_rd_fpr(decoded_instr_i[i].op)) begin
+            is_result_available_fpr_n[alloc_idx[i]] = 1'b0;
+          end else begin
+            is_result_available_gpr_n[alloc_idx[i]] = 1'b0;
+        if (CVA6Cfg.FpPresent) begin
+        end else begin
+          is_result_available_gpr_n[alloc_idx[i]] = 1'b0;
+        end
+
+      // In case of superscalar config, we check RAW hazard.
+      // Current method only work up to 2 issue port
+
+      if (!CVA6Cfg.FpPresent) begin
+        rs_n.valid_regs[i][0] = (i == 0 || decoded_instr_i[i].rs1 != decoded_instr_i[i-1].rd) ?
+          is_result_available_gpr_n[decoded_instr_i[i].rs1] : 1'b1;
+        rs_n.valid_regs[i][1] = (i == 0 || decoded_instr_i[i].rs2 != decoded_instr_i[i-1].rd) ?
+          is_result_available_gpr_n[decoded_instr_i[i].rs2] : 1'b1;
+      if (!CVA6Cfg.FpPresent) begin
+          rs_n.valid_regs[i][2] = (i == 0 || decoded_instr_i[i].rs3 != decoded_instr_i[i-1].rd) ?
+            is_result_available_gpr_n[decoded_instr_i[i].rs3] : 1'b1;
+        end
+      end else begin
+        rs_n.valid_regs[i][0] = (i == 0 || decoded_instr_i[i].rs1 != decoded_instr_i[i-1].rd)
+          ? (is_rs1_fpr(decoded_instr_i[i].op)
+          ? is_result_available_fpr_n[decoded_instr_i[i].rs1]
+          : is_result_available_gpr_n[decoded_instr_i[i].rs1])
+          : 1'b1;
+        rs_n.valid_regs[i][1] = (i == 0 || decoded_instr_i[i].rs2 != decoded_instr_i[i-1].rd)
+          ? (is_rs2_fpr(decoded_instr_i[i].op)
+          ? is_result_available_fpr_n[decoded_instr_i[i].rs2]
+          : is_result_available_gpr_n[decoded_instr_i[i].rs2])
+          : 1'b1;
+        if (NR_READ_PORTS == 3 && !decoded_instr_i[i].use_imm) begin
+          rs_n.valid_regs[i][2] = (i == 0 || decoded_instr_i[i].result != decoded_instr_i[i-1].rd)
+            ? (is_imm_fpr(decoded_instr_i[i].op)
+            ? is_result_available_fpr_n[decoded_instr_i[i].result]
+            : is_result_available_gpr_n[decoded_instr_i[i].result])
+            : 1'b1;
+        end
+      end
+    end
+
+    //updating table after commit
+    rs_n.free_regs = free_regs_masked[CVA6Cfg.NrIssuePorts];
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (commit_valid_i[i] && ((is_rd_fpr(commit_op_i) && FPR_RAT==1'b1) || (!is_rd_fpr(commit_op_i) && FPR_RAT==1'b0))) begin
+        rat_n.free_regs[commit_old_phys_i[i]] = 1'b1; //freeing old reg
+        //locking new reg. Useless for issue rat but necessary for commit rat
+        rat_n.free_regs[commit_new_phys_i[i]] = 1'b0;
+        if (COMMIT_RAT == 1'b1 && commit_rd_i[i] != '0) begin
+          rat_n.rat[commit_rd_i[i]] = commit_new_phys_i[i];
+        end
+      end
+    //rollback
+    if(rollback_we_i) begin
+      rat_n.free_regs[rat_n.rat[rollback_rd_i]] = 1'b1;
+      rat_n.rat[rollback_rd_i] = rollback_old_phys_i;
+    end
+
+    if (rat_restore_en_i) begin
+      rat_n = rat_restore_state_i;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+      if (CVA6Cfg.FpPresent) begin
+      rat_q.free_regs <= NUM_REG'('1) << 32;
+      for (int i = 0; i < 32; i++) begin
+        rat_q.rat[i] <= ADDR_WIDTH'(i);
+      end
+      is_result_available_gpr_q <= '1;
+      if (CVA6Cfg.FpPresent) begin
+        is_result_available_fpr_q <= '1;
+  end
+endmodule

@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Variables
-ASM_FILE="test_cmov.s"
-OBJ_FILE="test_cmov.o"
-ELF_FILE="test_cmov.riscv"
-BIN_FILE="test_cmov.bin"
-MEM_FILE="test_cmov.mem"
+ASM_FILE="test_fetch.s"
+OBJ_FILE="test_fetch.o"
+ELF_FILE="test_fetch.riscv"
+BIN_FILE="test_fetch.bin"
+MEM_FILE="test_fetch.mem"
 LINKER_SCRIPT="../../bsp/config/link.ld"
 OUTPUT_DIR="../"
 

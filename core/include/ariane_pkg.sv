@@ -511,10 +511,35 @@ package ariane_pkg;
     FCMOV
   } fu_op;
 
+  // list of all RS instantiated
+  typedef enum logic [3:0] {
+    FLU,
+    LOAD_STORE,
+    FPU_ALU2,
+    // F_ACCEL, not allowed yet on superscalar mode
+    F_CVXIF
+  } fu_phys;
+
   function automatic logic op_is_branch(input fu_op op);
     unique case (op) inside
       EQ, NE, LTS, GES, LTU, GEU: return 1'b1;
       default:                    return 1'b0;  // all other ops
+    endcase
+  endfunction
+
+  // Returns the size of each RS
+  function automatic int unsigned rs_size(input fu_phys phys);
+    unique case (phys)
+      FLU:  return 2;
+      LOAD_STORE: return 4;
+      FPU_ALU2: return 2;
+      F_CVXIF: return 1;
+      default: begin
+        // pragma translate_off
+        $fatal(1, "Invalid RS supplied");
+        // pragma translate_on
+        return 0;
+      end
     endcase
   endfunction
 

@@ -21,6 +21,7 @@ module scoreboard
     parameter type scoreboard_entry_t = logic,
     parameter type forwarding_t = logic,
     parameter type writeback_t = logic,
+    parameter type fu_data_t = logic,
     parameter type rs3_len_t = logic
 ) (
     // Subsystem Clock - SUBSYSTEM
@@ -56,8 +57,8 @@ module scoreboard
     input  logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_i,
     // Handshake's valid with decode stage - ID_STAGE
     input  logic              [CVA6Cfg.NrIssuePorts-1:0]       decoded_instr_valid_i,
-    // Handshake's acknowlege with decode stage - ID_STAGE
-    output logic              [CVA6Cfg.NrIssuePorts-1:0]       decoded_instr_ack_o,
+    // Handshake's acknowlege with decode stage - ISSUE_STAGE
+    input logic              [CVA6Cfg.NrIssuePorts-1:0]       decoded_instr_ack_i,
 
     // instruction to issue logic, if issue_instr_valid and issue_ready is asserted, advance the issue pointer
     // Entry about the instruction to issue - ISSUE_READ_OPERANDS
@@ -68,13 +69,13 @@ module scoreboard
     output logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_valid_o,
     // Issue stage acknowledge - ISSUE_READ_OPERANDS
     input  logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_ack_i,
-    // Forwarding - ISSUE_READ_OPERANDS
-    output forwarding_t                                        fwd_o,
 
     // Result from branch unit - EX_STAGE
     input bp_resolve_t resolved_branch_i,
     // Transaction ID at which to write the result back - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] trans_id_i,
+    // Global ID of the instructions - EX_STAGE
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] global_id_i,
     // Results to write back - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata_i,
     // Exception from a functional unit (e.g.: ld/st exception) - EX_STAGE
@@ -85,17 +86,50 @@ module scoreboard
     input logic x_we_i,
     // CVXIF destination register - ISSUE_STAGE
     input logic [4:0] x_rd_i,
+    // register address ex_stage data - ISSUE_READ_OPERANDS
+    output logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o,
+    // we enable for gpr regs - ISSUE_READ_OPERANDS
+    output logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o,
+    // we enable for fpr register - ISSUE_READ_OPERANDS
+    output logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o,
+
 
     // Issue pointer - RVFI
     output logic [ CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_issue_pointer_o,
     // Commit pointer - RVFI
     output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_commit_pointer_o,
+    // data sent to ex stage - ISSUE_READ_OPERANDS
+    input  fu_data_t [CVA6Cfg.NrIssuePorts-1:0]                         fu_data_i,
+    // is lsu valid - ISSUE_READ_OPERANDS
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                             lsu_valid_i,
 
+
+    // physical destination register to rollback - ISSUE_STAGE
     output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_o,
+    // global rs id of the instruction to remove - ISSUE_STAGE
+    output logic [CVA6Cfg.GlobalRsIdWidth-1:0]           rollback_id_o,
+    // old physical destination register to rollback - ISSUE_STAGE
     output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_o,
+    // is rollback active - ISSUE_STAGE
     output logic                                         rollback_we_o,
-    fu_op                                                rollback_op_o
-
+    // is rollbacked instr a store - STORE_BUFFER
+    output logic                                         rollback_store_buffer_o,
+    // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
+    output logic                                         rollback_ex_o,
+    // rollback trans id - EX_STAGE
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]             rollback_trans_id_o,
+    // Has a store been dispatched ? - STORE_UNIT
+    input logic store_dispatched_i,
+    // Store dispatched trans_id - STORE_UNIT
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_i,
+    // op of the instruction to rollback - ISSUE_STAGE
+    output fu_op                                         rollback_op_o,
+    // architectural destination register to rollback - ISSUE_STAGE
+    output logic [31:0]                                  rollback_arch_rd_o,
+    // op of the instructions wrote back - ISSUE_STAGE
+    output fu_op [CVA6Cfg.NrWbPorts-1:0]                 wb_op_o,
+    // is writeback valid - ISSUE_STAGE
+    output logic [CVA6Cfg.NrWbPorts-1:0]                 wb_valid_o
 );
 
   // this is the FIFO struct of the issue queue
@@ -103,8 +137,11 @@ module scoreboard
     logic issued;  // this bit indicates whether we issued this instruction e.g.: if it is valid
     logic cancelled;  // this instruction was cancelled (speculative scoreboard)
     logic is_rd_fpr_flag;  // redundant meta info, added for speed
+    logic lsu_dispatched; // instr is a store/load and was sent to execute
+    logic store_dispatched; // instr is a store and was sent to store buffer
     scoreboard_entry_t sbe;  // this is the score board entry we will send to ex
   } sb_mem_t;
+
   sb_mem_t [CVA6Cfg.NR_SB_ENTRIES-1:0] mem_q, mem_n;
   logic [CVA6Cfg.NR_SB_ENTRIES-1:0] still_issued;
 
@@ -113,7 +150,6 @@ module scoreboard
 
   logic bmiss;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] after_flu_wb;
-  logic [CVA6Cfg.NR_SB_ENTRIES-1:0] speculative_instrs;
 
   logic [CVA6Cfg.NrIssuePorts-1:0] num_issue;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] issue_pointer_n, issue_pointer_q;
@@ -130,7 +166,10 @@ module scoreboard
   state_t state_n, state_q;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_pointer_n, rollback_pointer_q;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] bmiss_trans_id_n, bmiss_trans_id_q;
+  logic [CVA6Cfg.NrWbPorts-1:0] wb_valid_gated;
+  logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_boundary;
 
+  assign rollback_boundary = bmiss ? after_flu_wb : bmiss_trans_id_q;
 
   for (genvar i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
     assign still_issued[i] = mem_q[i].issued & ~mem_q[i].cancelled;
@@ -155,7 +194,10 @@ module scoreboard
     for (int unsigned i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin
       commit_instr_o[i] = mem_q[commit_pointer_q[i]].sbe;
       commit_instr_o[i].trans_id = commit_pointer_q[i];
-      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled;
+      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled || (bmiss && (commit_pointer_q[i] == after_flu_wb));
+      if ((bmiss || state_q == WALKBACK) && commit_pointer_q[i] == rollback_boundary) begin
+        commit_instr_o[i].valid = 1'b0;
+      end
     end
   end
 
@@ -172,8 +214,7 @@ module scoreboard
       // make sure we assign the correct trans ID
       issue_instr_o[i].trans_id = issue_pointer[i];
 
-      issue_instr_valid_o[i]    = decoded_instr_valid_i[i] & ~issue_full[i];
-      decoded_instr_ack_o[i]    = issue_ack_i[i] & ~issue_full[i];
+      issue_instr_valid_o[i]    = decoded_instr_valid_i[i] & ~issue_full[i] & (state_q == NORMAL);
     end
   end
 
@@ -186,7 +227,7 @@ module scoreboard
 
     // if we got a acknowledge from the issue stage, put this scoreboard entry in the queue
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (decoded_instr_valid_i[i] && decoded_instr_ack_o[i] && !flush_unissued_instr_i) begin
+      if (decoded_instr_valid_i[i] && decoded_instr_ack_i[i] && !flush_unissued_instr_i) begin
         // the decoded instruction we put in there is valid (1st bit)
         // increase the issue counter and advance issue pointer
         num_issue += 'd1;
@@ -194,6 +235,8 @@ module scoreboard
             issued: 1'b1,
             cancelled: 1'b0,
             is_rd_fpr_flag: CVA6Cfg.FpPresent && ariane_pkg::is_rd_fpr(decoded_instr_i[i].op),
+            lsu_dispatched: 1'b0,
+            store_dispatched: 1'b0,
             sbe: decoded_instr_i[i]
         };
       end
@@ -211,9 +254,14 @@ module scoreboard
     // Write Back
     // ------------
     for (int unsigned i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
+      automatic logic wb_id_match;
+      wb_id_match = (i == LOAD_WB)
+          ? (mem_q[trans_id_i[i]].sbe.global_rs_id == global_id_i[i])
+          : 1'b1;
+
       // check if this instruction was issued (e.g.: it could happen after a flush that there is still
       // something in the pipeline e.g. an incomplete memory operation)
-      if (wt_valid_i[i] && mem_q[trans_id_i[i]].issued) begin
+      if (wt_valid_i[i] && mem_q[trans_id_i[i]].issued && wb_id_match) begin
         if (mem_q[trans_id_i[i]].sbe.is_double_rd_macro_instr && mem_q[trans_id_i[i]].sbe.is_macro_instr) begin
           if (mem_q[trans_id_i[i]].sbe.is_last_macro_instr) begin
             mem_n[trans_id_i[i]].sbe.valid = 1'b1;
@@ -240,6 +288,29 @@ module scoreboard
           mem_n[trans_id_i[i]].sbe.ex.cause = ex_i[i].cause;
         end
       end
+
+      //updating write info
+      wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued && wb_id_match;
+      wb_valid_o = wb_valid_gated;
+
+
+      wbaddr_o[i] = mem_q[trans_id_i[i]].sbe.rd;
+      gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
+      fpr_we_o[i] =  is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
+      wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;
+    end
+
+
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      // memory operation enters lsu
+      if (fu_data_i[i].fu inside {LOAD, STORE} && lsu_valid_i[i] ) begin
+        mem_n[fu_data_i[i].trans_id].lsu_dispatched = 1'b1;
+      end
+
+      // store operation enters store buffer
+      if (store_dispatched_i) begin
+        mem_n[store_dispatched_id_i].store_dispatched = 1'b1;
+      end
     end
 
     // ------------
@@ -260,9 +331,11 @@ module scoreboard
     for (int i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin
       if (commit_ack_i[i]) begin
         // this instruction is no longer in issue e.g.: it is considered finished
-        mem_n[commit_pointer_q[i]].issued    = 1'b0;
-        mem_n[commit_pointer_q[i]].cancelled = 1'b0;
-        mem_n[commit_pointer_q[i]].sbe.valid = 1'b0;
+        mem_n[commit_pointer_q[i]].issued           = 1'b0;
+        mem_n[commit_pointer_q[i]].cancelled        = 1'b0;
+        mem_n[commit_pointer_q[i]].sbe.valid        = 1'b0;
+        mem_n[commit_pointer_q[i]].lsu_dispatched   = 1'b0;
+        mem_n[commit_pointer_q[i]].store_dispatched = 1'b0;
       end
     end
 
@@ -273,10 +346,12 @@ module scoreboard
       // flush
       for (int unsigned i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
         // set all valid flags for all entries to zero
-        mem_n[i].issued       = 1'b0;
-        mem_n[i].cancelled    = 1'b0;
-        mem_n[i].sbe.valid    = 1'b0;
-        mem_n[i].sbe.ex.valid = 1'b0;
+        mem_n[i].issued           = 1'b0;
+        mem_n[i].cancelled        = 1'b0;
+        mem_n[i].sbe.valid        = 1'b0;
+        mem_n[i].sbe.ex.valid     = 1'b0;
+        mem_n[i].lsu_dispatched   = 1'b0;
+        mem_n[i].store_dispatched = 1'b0;
       end
     end
 
@@ -284,10 +359,12 @@ module scoreboard
     // End of rollback after branch misprediction
     // ------------
     if (state_q == WALKBACK) begin
-      mem_n[rollback_pointer_q].issued       = 1'b0;
-      mem_n[rollback_pointer_q].cancelled    = 1'b0;
-      mem_n[rollback_pointer_q].sbe.valid    = 1'b0;
-      mem_n[rollback_pointer_q].sbe.ex.valid = 1'b0;
+      mem_n[rollback_pointer_q].issued           = 1'b0;
+      mem_n[rollback_pointer_q].cancelled        = 1'b0;
+      mem_n[rollback_pointer_q].sbe.valid        = 1'b0;
+      mem_n[rollback_pointer_q].sbe.ex.valid     = 1'b0;
+      mem_n[rollback_pointer_q].lsu_dispatched   = 1'b0;
+      mem_n[rollback_pointer_q].store_dispatched = 1'b0;
     end
 
   end
@@ -306,28 +383,16 @@ module scoreboard
 
   always_comb begin : assign_issue_pointer_n
     issue_pointer_n = issue_pointer[num_issue];
-    if (flush_i) issue_pointer_n = '0;
+    if (flush_i) begin
+      issue_pointer_n = '0;
+    end else if (rollback_pointer_q == bmiss_trans_id_q && state_q == WALKBACK) begin
+      issue_pointer_n = bmiss_trans_id_q;
+    end
   end
 
   // precompute offsets for commit slots
   for (genvar k = 1; k < CVA6Cfg.NrCommitPorts; k++) begin : gen_cnt_incr
     assign commit_pointer_n[k] = (flush_i) ? '0 : commit_pointer_n[0] + unsigned'(k);
-  end
-
-  // Forwarding logic
-  writeback_t [CVA6Cfg.NrWbPorts-1:0] wb;
-  for (genvar i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
-    assign wb[i].valid = wt_valid_i[i];
-    assign wb[i].data = wbdata_i[i];
-    assign wb[i].ex_valid = ex_i[i].valid;
-    assign wb[i].trans_id = trans_id_i[i];
-  end
-
-  assign fwd_o.still_issued = still_issued;
-  assign fwd_o.issue_pointer = issue_pointer;
-  assign fwd_o.wb = wb;
-  for (genvar i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
-    assign fwd_o.sbe[i] = mem_q[i].sbe;
   end
 
   always_comb begin : rollback
@@ -336,8 +401,12 @@ module scoreboard
     bmiss_trans_id_n    = bmiss_trans_id_q;
     rollback_rd_o = '0;
     rollback_we_o = 1'b0;
+    rollback_store_buffer_o = 1'b0;
+    rollback_ex_o = 1'b0;
+    rollback_id_o = '0;
     rollback_old_phys_o = '0;
     rollback_op_o = ADD;
+    rollback_trans_id_o = '0;
 
     if (flush_i) begin
       state_n            = NORMAL;
@@ -350,20 +419,27 @@ module scoreboard
             bmiss_trans_id_n = after_flu_wb;
           end
           if (flush_unissued_instr_i && !flush_i) begin
-            state_n = WALKBACK;
-            rollback_pointer_n = issue_pointer[0]-1;
+            if (issue_pointer[0] == bmiss_trans_id_n) begin
+              state_n = NORMAL;
+            end else begin
+              state_n = WALKBACK;
+              rollback_pointer_n = issue_pointer[0] - 1;
+            end
           end
         end
         WALKBACK : begin
+          rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
+          rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
+          rollback_we_o = mem_q[rollback_pointer_q].issued;
+          rollback_store_buffer_o = mem_q[rollback_pointer_q].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_pointer_q);
+          rollback_ex_o = mem_q[rollback_pointer_q].issued;
+          rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
+          rollback_trans_id_o = mem_q[rollback_pointer_q].sbe.trans_id;
+          rollback_arch_rd_o = mem_q[rollback_pointer_q].sbe.arch_rd;
+          rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
+          rollback_pointer_n = rollback_pointer_q - 1;
           if (rollback_pointer_q == bmiss_trans_id_q) begin
             state_n = NORMAL;
-            rollback_we_o = 1'b0;
-          end else begin
-            rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
-            rollback_we_o = mem_q[rollback_pointer_q].issued;
-            rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
-            rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
-            rollback_pointer_n = rollback_pointer_q - 1;
           end
         end
       endcase

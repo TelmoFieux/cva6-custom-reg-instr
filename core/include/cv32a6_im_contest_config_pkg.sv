@@ -12,14 +12,14 @@ package cva6_config_pkg;
 
   localparam CVA6ConfigXlen = 32;
 
-  localparam CVA6ConfigRVF = 1;
+  localparam CVA6ConfigRVF = 0;
   localparam CVA6ConfigF16En = 0;
   localparam CVA6ConfigF16AltEn = 0;
   localparam CVA6ConfigF8En = 0;
   localparam CVA6ConfigFVecEn = 0;
 
   localparam CVA6ConfigCvxifEn = 0;
-  localparam CVA6ConfigCExtEn = 0;
+  localparam CVA6ConfigCExtEn = 1;
   localparam CVA6ConfigZcbExtEn = 0;
   localparam CVA6ConfigZcmpExtEn = 0;
   localparam CVA6ConfigAExtEn = 0;
@@ -47,7 +47,7 @@ package cva6_config_pkg;
 
   localparam CVA6ConfigWtDcacheWbufDepth = 2;
 
-  localparam CVA6ConfigNrScoreboardEntries = 4;
+  localparam CVA6ConfigNrScoreboardEntries = 16;
 
   localparam CVA6ConfigNrLoadPipeRegs = 1;
   localparam CVA6ConfigNrStorePipeRegs = 0;
@@ -69,7 +69,9 @@ package cva6_config_pkg;
 
   localparam CVA6ConfigRvfiTrace = 1;
 
+  // OoO parameters
   localparam CVA6ConfigRegAddrWidth = 6;
+  localparam CVA6ConfigGlobalRsIdWidth = 8;
 
   localparam config_pkg::cva6_user_cfg_t cva6_cfg = '{
       XLEN: unsigned'(CVA6ConfigXlen),
@@ -77,7 +79,7 @@ package cva6_config_pkg;
       FpgaEn: bit'(1),  // for Xilinx and Altera
       FpgaAlteraEn: bit'(0),  // for Altera (only)
       TechnoCut: bit'(0),
-      SuperscalarEn: bit'(0),
+      SuperscalarEn: bit'(1),
       NrCommitPorts: unsigned'(1),
       AxiAddrWidth: unsigned'(CVA6ConfigAxiAddrWidth),
       AxiDataWidth: unsigned'(CVA6ConfigAxiDataWidth),
@@ -86,6 +88,7 @@ package cva6_config_pkg;
       MemTidWidth: unsigned'(CVA6ConfigMemTidWidth),
       NrLoadBufEntries: unsigned'(CVA6ConfigNrLoadBufEntries),
       RegAddrWidth : unsigned'(CVA6ConfigRegAddrWidth),
+      GlobalRsIdWidth : unsigned'(CVA6ConfigGlobalRsIdWidth),
       CMOV: bit'(1),
       RVF: bit'(CVA6ConfigRVF),
       RVD: bit'(0),
