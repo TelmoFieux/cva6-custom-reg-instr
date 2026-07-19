@@ -70,8 +70,8 @@ package cva6_config_pkg;
   localparam CVA6ConfigRvfiTrace = 1;
 
   // OoO parameters
-  localparam CVA6ConfigRegAddrWidth = 6;
-  localparam CVA6ConfigGlobalRsIdWidth = 8;
+  localparam CVA6ConfigRegAddrWidth = 5;
+  localparam CVA6ConfigGlobalRsIdWidth = 9;
 
   localparam config_pkg::cva6_user_cfg_t cva6_cfg = '{
       XLEN: unsigned'(CVA6ConfigXlen),

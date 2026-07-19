@@ -56,7 +56,7 @@ package ariane_pkg;
   localparam logic [31:0] ARIANE_MARCHID = 32'd3;
 
   // 32 registers
-  localparam REG_ADDR_SIZE = 6;
+  localparam REG_ADDR_SIZE = 5;
 
   // Read ports for general purpose register files
   localparam NR_RGPR_PORTS = 2;
@@ -270,7 +270,7 @@ package ariane_pkg;
 
   typedef struct packed {
     logic [31:0][REG_ADDR_SIZE-1:0] rat;
-    logic [(2**REG_ADDR_SIZE)-1:0] free_regs;
+    logic [(2**REG_ADDR_SIZE)-1:0] free_regs; // available registers
   } rat_table_t;
 
   // ---------------

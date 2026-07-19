@@ -207,6 +207,7 @@ module issue_stage
 
   forwarding_t                                        fwd;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_sb_iro;
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       dispatch_instr_o;
   logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_sb_iro;
   logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_valid_sb_iro;
   logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_ack_iro_sb;
@@ -435,11 +436,12 @@ module issue_stage
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
 
-  scoreboard_entry_t [NR_WB-1:0] rs_results;
-  logic [NR_WB-1:0] rs_valid;
+  logic [NR_WB-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rs_results;
+  logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rs_global_id;
   logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_full;
+  logic [NR_WB-1:0] rs_valid;
 
-  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] tree_results;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] tree_results;
   logic [CVA6Cfg.NrIssuePorts-1:0] tree_valid;
 
 
@@ -455,7 +457,8 @@ module issue_stage
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
       logic fu_ready;
 
-      scoreboard_entry_t               decoded_instr_o;
+      logic [CVA6Cfg.TRANS_ID_BITS-1:0]decoded_instr_trans_id_o;
+      logic [CVA6Cfg.GlobalRsIdWidth-1:0]decoded_instr_global_id_o;
       logic                            decoded_instr_valid_o;
       logic [CVA6Cfg.NrIssuePorts-1:0] rs_full_o;
 
@@ -544,32 +547,35 @@ module issue_stage
         .CSR_EN             (en_csr),
         .scoreboard_entry_t (scoreboard_entry_t)
       ) i_reservation_station (
-        .clk_i                  (clk_i),
-        .rst_ni                 (rst_ni),
-        .full_o                 (rs_full_o),
-        .we_i                   (we_i),
-        .rm_i                   (rm_i),
-        .rm_id_i                (rm_id_i),
-        .wb_valid_i             (wb_valid_o),
-        .wb_rd_i                (wbaddr_o),
-        .wb_op_i                (wb_op_o),
-        .rollback_id_i          (rollback_id_o),
-        .rollback_en_i          (rollback_we_i),
-        .rollback_op_i          (rollback_op_i),
-        .rollback_rd_i          (rollback_rd_i),
-        .rs_restore_en_i        (flush_i),
-        .decoded_instr_i        (renamed_instr_i),
-        .decoded_instr_ack_i    (decoded_instr_ack_o),
-        .decoded_instr_o        (decoded_instr_o),
-        .decoded_instr_valid_o  (decoded_instr_valid_o)
+        .clk_i                      (clk_i),
+        .rst_ni                     (rst_ni),
+        .full_o                     (rs_full_o),
+        .we_i                       (we_i),
+        .rm_i                       (rm_i),
+        .rm_id_i                    (rm_id_i),
+        .wb_valid_i                 (wb_valid_o),
+        .wb_rd_i                    (wbaddr_o),
+        .wb_op_i                    (wb_op_o),
+        .rollback_id_i              (rollback_id_o),
+        .rollback_en_i              (rollback_we_i),
+        .rollback_op_i              (rollback_op_i),
+        .rollback_rd_i              (rollback_rd_i),
+        .rs_restore_en_i            (flush_i),
+        .decoded_instr_i            (renamed_instr_i),
+        .decoded_instr_ack_i        (decoded_instr_ack_o),
+        .decoded_instr_trans_id_o   (decoded_instr_trans_id_o),
+        .decoded_instr_global_id_o  (decoded_instr_global_id_o),
+        .decoded_instr_valid_o      (decoded_instr_valid_o)
       );
-      assign rs_results[i] = decoded_instr_o;
+      assign rs_results[i] = decoded_instr_trans_id_o;
       assign rs_valid[i] = decoded_instr_valid_o && fu_ready;
       assign rs_full[i] = rs_full_o & we_i;
+      assign rs_global_id[i] = decoded_instr_global_id_o;
     end else begin
       assign rs_results[i] = '0;
       assign rs_valid[i] = '0;
       assign rs_full[i] = '0;
+      assign rs_global_id[i] = '0;
     end
   end
 
@@ -591,7 +597,7 @@ module issue_stage
   assign tournament_valid_masked [0] = rs_valid;
 
   for (genvar i = 0 ; i < NR_WB ; i++) begin
-    assign tournament_seq_num[i] = rs_results[i].global_rs_id;
+    assign tournament_seq_num[i] = rs_global_id[i];
     assign tournament_id[i] = i;
   end
 
@@ -624,19 +630,19 @@ module issue_stage
   // and it must be issued strictly in order
 
   always_comb begin : issue_valid
-    if (tree_results[0].fu == CSR || tree_results[1].fu == CSR) begin
-      issue_instr_sb_iro[0] = tree_results[0];
+    if (dispatch_instr_o[0].fu == CSR || dispatch_instr_o[1].fu == CSR) begin
+      issue_instr_sb_iro[0] = dispatch_instr_o[0];
       issue_instr_sb_iro[1] = '0;
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = 1'b0;
-    end else if (tree_results[1].fu == CVXIF) begin
-      issue_instr_sb_iro[0] = tree_results[1];
-      issue_instr_sb_iro[1] = tree_results[0];
+    end else if (dispatch_instr_o[1].fu == CVXIF) begin
+      issue_instr_sb_iro[0] = dispatch_instr_o[1];
+      issue_instr_sb_iro[1] = dispatch_instr_o[0];
       issue_instr_valid_sb_iro[0] = tree_valid[1];
       issue_instr_valid_sb_iro[1] = tree_valid[0];
     end else begin
-      issue_instr_sb_iro[0] = tree_results[0];
-      issue_instr_sb_iro[1] = tree_results[1];
+      issue_instr_sb_iro[0] = dispatch_instr_o[0];
+      issue_instr_sb_iro[1] = dispatch_instr_o[1];
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = tree_valid[1];
     end
@@ -690,10 +696,11 @@ module issue_stage
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
       .decoded_instr_ack_i     (decoded_instr_ack_o),
-      .issue_instr_o           (),//j'ai enlevé cette valeur qui est drivé par les rs)
+      .dispatch_instr_trans_id_i(tree_results),
+      .dispatch_instr_o,
       .orig_instr_o            (orig_instr_sb_iro),
       .issue_instr_valid_o     (issue_instr_ack),
-      .issue_ack_i             (issue_instr_ack),
+      .issue_ack_i             (),
       .resolved_branch_i       (resolved_branch_i),
       .trans_id_i              (trans_id_i),
       .global_id_i             (global_id_i),
