@@ -56,7 +56,7 @@ package ariane_pkg;
   localparam logic [31:0] ARIANE_MARCHID = 32'd3;
 
   // 32 registers
-  localparam REG_ADDR_SIZE = 5;
+  localparam REG_ADDR_SIZE = 6;
 
   // Read ports for general purpose register files
   localparam NR_RGPR_PORTS = 2;
@@ -530,10 +530,10 @@ package ariane_pkg;
   // Returns the size of each RS
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
-      FLU:  return 2;
+      FLU:  return 4;
       LOAD_STORE: return 4;
-      FPU_ALU2: return 2;
-      F_CVXIF: return 1;
+      FPU_ALU2: return 4;
+      F_CVXIF: return 4;
       default: begin
         // pragma translate_off
         $fatal(1, "Invalid RS supplied");
