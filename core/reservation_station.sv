@@ -52,14 +52,29 @@ module reservation_station
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i,
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
-    output scoreboard_entry_t                                           decoded_instr_o, //instructions found ready
+    output [CVA6Cfg.TRANS_ID_BITS-1:0]                                  decoded_instr_trans_id_o, //instructions found ready
+    output [CVA6Cfg.GlobalRsIdWidth-1:0]                                decoded_instr_global_id_o, //instructions found ready
     output logic                                                        decoded_instr_valid_o //is instruction valid
 );
 
   localparam NUM_REG = 2 ** ADDR_WIDTH;
 
+  // stripped down version of scoreboard_entry_t in order to store only needed data
   typedef struct packed {
-    scoreboard_entry_t [NR_RS_ENTRIES-1:0] rs_table;
+      logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id;
+      logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;
+      fu_t fu;
+      fu_op op;
+      logic [CVA6Cfg.RegAddrWidth-1:0] rs1;
+      logic [CVA6Cfg.RegAddrWidth-1:0] rs2;
+      logic [CVA6Cfg.RegAddrWidth-1:0] rd;
+      logic [CVA6Cfg.XLEN-1:0] result;
+      logic use_imm;
+      logic ex_valid; // an exception has occurred during frontend
+  } rs_entry_t;
+
+  typedef struct packed {
+    rs_entry_t [NR_RS_ENTRIES-1:0] rs_table;
     logic [NR_RS_ENTRIES-1:0] free_entries;
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
   } reservation_station_t;
@@ -160,7 +175,8 @@ module reservation_station
     assign decoded_instr_valid_o = winner_valid_o;
   end
 
-  assign decoded_instr_o = rs_q.rs_table[winner_o];
+  assign decoded_instr_trans_id_o = rs_q.rs_table[winner_o].trans_id;
+  assign decoded_instr_global_id_o = rs_q.rs_table[winner_o].global_rs_id;
 
   always_comb begin : updating_rs
     logic allocated_by_p0;
@@ -198,7 +214,19 @@ module reservation_station
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (decoded_instr_ack_i[i]) begin
         if (we_i[i] && empty_mask[i] == 1'b0) begin
-          rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
+          rs_n.rs_table[alloc_idx[i]] =
+            {
+            decoded_instr_i[i].global_rs_id,
+            decoded_instr_i[i].trans_id,
+            decoded_instr_i[i].fu,
+            decoded_instr_i[i].op,
+            decoded_instr_i[i].rs1,
+            decoded_instr_i[i].rs2,
+            decoded_instr_i[i].rd,
+            decoded_instr_i[i].result,
+            decoded_instr_i[i].use_imm,
+            decoded_instr_i[i].ex.valid
+            };
         end
 
         //always update dependency based on newly issued instr
@@ -423,7 +451,7 @@ module reservation_station
         if (decoded_instr_i[1].ex.valid || decoded_instr_i[1].fu == NONE)
           rs_n.valid_regs[i] = '1;
       end else begin
-        if (rs_q.rs_table[i].ex.valid || rs_q.rs_table[i].fu == NONE)
+        if (rs_q.rs_table[i].ex_valid || rs_q.rs_table[i].fu == NONE)
           rs_n.valid_regs[i] = '1;
       end
     end

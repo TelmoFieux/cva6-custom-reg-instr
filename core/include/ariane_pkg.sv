@@ -270,7 +270,7 @@ package ariane_pkg;
 
   typedef struct packed {
     logic [31:0][REG_ADDR_SIZE-1:0] rat;
-    logic [(2**REG_ADDR_SIZE)-1:0] free_regs;
+    logic [(2**REG_ADDR_SIZE)-1:0] free_regs; // available registers
   } rat_table_t;
 
   // ---------------
@@ -530,10 +530,10 @@ package ariane_pkg;
   // Returns the size of each RS
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
-      FLU:  return 2;
+      FLU:  return 4;
       LOAD_STORE: return 4;
-      FPU_ALU2: return 2;
-      F_CVXIF: return 1;
+      FPU_ALU2: return 4;
+      F_CVXIF: return 4;
       default: begin
         // pragma translate_off
         $fatal(1, "Invalid RS supplied");

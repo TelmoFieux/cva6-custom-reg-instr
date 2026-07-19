@@ -57,22 +57,28 @@ module register_allocation_table
   assign free_regs_masked[0] = rat_q.free_regs;
 
   //priority encoder cascade to get index for each instr
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
-      lzc #(
-          .WIDTH(NUM_REG),
-          .MODE(1'b0))
-      i_lzc (
-          .in_i   (free_regs_masked[i]),
-          .cnt_o  (alloc_idx[i]),
-          .empty_o(empty_mask[i])
-      );
+  if (!COMMIT_RAT) begin
+    for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
+        lzc #(
+            .WIDTH(NUM_REG),
+            .MODE(1'b0))
+        i_lzc (
+            .in_i   (free_regs_masked[i]),
+            .cnt_o  (alloc_idx[i]),
+            .empty_o(empty_mask[i])
+        );
 
-      assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_o) ?
-        (free_regs_masked[i] & ~(NUM_REG'(1) << alloc_idx[i])) :
-        free_regs_masked[i];
+        assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) ?
+          (free_regs_masked[i] & ~(NUM_REG'(1) << alloc_idx[i])) :
+          free_regs_masked[i];
+    end
+
+    assign empty_o = empty_mask;
+  end else begin
+    assign empty_o = '0;
+    assign free_regs_masked[CVA6Cfg.NrIssuePorts] = rat_q.free_regs;
   end
 
-  assign empty_o = empty_mask;
 
   // RAT of size nb register i.e 32 containing adress of physical register
   rat_table_t rat_n, rat_q;
@@ -86,7 +92,7 @@ module register_allocation_table
       renamed_instr_o[i].arch_rd = decoded_instr_i[i].rd;
 
       // Renaming destination
-      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_o) begin
+      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
         //check WAW hazard
         if (i > 0 && we_i[i-1] && decoded_instr_ack_i[i-1] &&
             decoded_instr_i[i].rd == decoded_instr_i[i-1].rd) begin
@@ -134,7 +140,7 @@ module register_allocation_table
 
       end
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_o) begin
+        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
           rat_n.rat[decoded_instr_i[i].rd] = alloc_idx[i];
         end
       end
@@ -156,15 +162,17 @@ module register_allocation_table
     end
   end
 
+  assign rat_state_o = rat_q;
+
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      rat_q.free_regs <= NUM_REG'('1) << 32;
+      // rat_q.free_regs <= NUM_REG'('1) << 32;
+      rat_q.free_regs <= '1;
       for (int i = 0; i < 32; i++) begin
         rat_q.rat[i] <= ADDR_WIDTH'(i);
       end
     end else begin
       rat_q <= rat_n;
-      rat_state_o <= rat_n;
     end
   end
 endmodule
