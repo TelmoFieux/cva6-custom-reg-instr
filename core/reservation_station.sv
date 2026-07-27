@@ -202,7 +202,7 @@ module reservation_station
           is_result_available_gpr_n[wb_rd_i[i]] = 1'b1;
         end
 
-        // In case os memory operations release the lock when the last one finished
+        // memory operations release the lock when the last one finished
         if (LSU_EN) begin
           if (i == STORE_WB || i == LOAD_WB) begin
             lsu_used_n = 1'b0;
@@ -275,7 +275,7 @@ module reservation_station
             end
         end
         // rollback
-        else if (rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id && !rs_q.free_entries[i]) begin
+        else if (rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id) begin
             rs_n.free_entries[i] = 1'b1;
             if (LSU_EN) begin
                 lsu_used_n = 1'b0; // unlocking lsu

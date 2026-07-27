@@ -536,7 +536,7 @@ package ariane_pkg;
       F_CVXIF: return 4;
       default: begin
         // pragma translate_off
-        $fatal(1, "Invalid RS supplied");
+        $fatal(1, "Invalid RS size supplied");
         // pragma translate_on
         return 0;
       end

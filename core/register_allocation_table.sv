@@ -166,8 +166,8 @@ module register_allocation_table
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      // rat_q.free_regs <= NUM_REG'('1) << 32;
-      rat_q.free_regs <= '1;
+      rat_q.free_regs <= NUM_REG'('1) << 32;
+      //rat_q.free_regs <= '1;
       for (int i = 0; i < 32; i++) begin
         rat_q.rat[i] <= ADDR_WIDTH'(i);
       end

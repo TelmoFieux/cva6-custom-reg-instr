@@ -165,13 +165,6 @@ module load_unit
       ldbuf_flushed_d = '1;
     end
 
-    // squash entry on rollback
-    for (int unsigned i = 0; i < CVA6Cfg.NrLoadBufEntries; i++) begin
-      if (ldbuf_valid_q[i] && ldbuf_q[i].trans_id == rollback_trans_id_i && rollback_i) begin
-        ldbuf_flushed_d[i] = '1;
-      end
-    end
-
     //  Free read entry (in the case of fall-through mode, free the entry
     //  only if there is no pending load)
     if (ldbuf_r && (!LDBUF_FALLTHROUGH || !ldbuf_w)) begin
@@ -181,6 +174,13 @@ module load_unit
     if (ldbuf_w) begin
       ldbuf_flushed_d[ldbuf_windex] = 1'b0;
       ldbuf_valid_d[ldbuf_windex]   = 1'b1;
+    end
+
+    // squash entry on rollback
+    for (int unsigned i = 0; i < CVA6Cfg.NrLoadBufEntries; i++) begin
+      if (ldbuf_valid_q[i] && ldbuf_q[i].trans_id == rollback_trans_id_i && rollback_i) begin
+        ldbuf_flushed_d[i] = '1;
+      end
     end
   end
 
@@ -263,7 +263,8 @@ module load_unit
     // In IDLE and SEND_TAG states, this unit can accept a new load request
     // when the load buffer is not full or if there is a response and the
     // load buffer is in fall-through mode
-    accept_req           = (valid_i && (!ldbuf_full || (LDBUF_FALLTHROUGH && ldbuf_r)));
+    accept_req = (valid_i && (!ldbuf_full || (LDBUF_FALLTHROUGH && ldbuf_r)))
+             && !(rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id);
 
     case (state_q)
       IDLE: begin
@@ -420,6 +421,22 @@ module load_unit
         end
       end
     endcase
+
+    // In case of rollback we change the FSM state
+    if (rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id) begin
+      unique case (state_q)
+        WAIT_GNT: begin
+          state_d = IDLE;
+          req_port_o.data_req = 1'b0;
+          translation_req_o    = 1'b0;
+        end
+        SEND_TAG, ABORT_TRANSACTION, ABORT_TRANSACTION_NI,
+        WAIT_TRANSLATION, WAIT_WB_EMPTY: begin
+          state_d = IDLE;
+        end
+        default: ;
+      endcase
+    end
 
     // if we just flushed and the queue is not empty or we are getting an rvalid this cycle wait in a extra stage
     if (flush_i) begin

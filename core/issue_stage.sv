@@ -205,7 +205,6 @@ module issue_stage
   } forwarding_t;
 
 
-  forwarding_t                                        fwd;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_sb_iro;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       dispatch_instr_o;
   logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_sb_iro;
