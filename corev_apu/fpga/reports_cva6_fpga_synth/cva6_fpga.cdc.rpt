@@ -1,0 +1,20 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Tue Jul 28 18:44:32 2026
+| Host         : rayan-HP-ProBook-445-G8-Notebook-PC running 64-bit Ubuntu 24.04.1 LTS
+| Command      : report_cdc -file reports_cva6_fpga_synth/cva6_fpga.cdc.rpt
+| Design       : cva6_zybo_z7_20
+| Device       : 7z020-clg400
+| Speed File   : -1  PRODUCTION 1.12 2019-11-22
+| Design State : Synthesized
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+CDC Report
+
+Severity  Source Clock           Destination Clock      CDC Type                 Exceptions           Endpoints  Safe  Unsafe  Unknown  No ASYNC_REG  
+--------  ---------------------  ---------------------  -----------------------  -------------------  ---------  ----  ------  -------  ------------  
+Critical  input port clock       tck                    No Common Primary Clock  False Path                 206     0       0      206             0  
+Warning   tck                    clk_out1_xlnx_clk_gen  No Common Primary Clock  Asynch Clock Groups         43    43       0        0             1  
+Warning   clk_out1_xlnx_clk_gen  tck                    No Common Primary Clock  Asynch Clock Groups         36    36       0        0             1  
+

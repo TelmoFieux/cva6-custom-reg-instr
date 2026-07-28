@@ -111,8 +111,8 @@ report_cdc                                                              -file re
 report_clock_interaction                                                -file reports_cva6_fpga_synth/$project.clock_interaction.rpt
 
 # set for RuntimeOptimized implementation
-set_property "steps.place_design.args.directive" "RuntimeOptimized" [get_runs impl_1]
-set_property "steps.route_design.args.directive" "RuntimeOptimized" [get_runs impl_1]
+set_property "steps.place_design.args.directive" "Explore" [get_runs impl_1]
+set_property "steps.route_design.args.directive" "Explore" [get_runs impl_1]
 
 ##create_clock -period $::env(CLK_PERIOD_NS) -name clk_i   [get_ports clk_i]
 

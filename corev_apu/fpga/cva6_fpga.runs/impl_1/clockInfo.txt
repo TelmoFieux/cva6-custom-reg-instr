@@ -1,0 +1,10 @@
+-------------------------------------
+| Tool Version : Vivado v.2025.2
+| Date         : Tue Jul 28 18:45:40 2026
+| Host         : rayan-HP-ProBook-445-G8-Notebook-PC
+| Design       : checkpoint_cva6_zybo_z7_20
+| Device       : xc7z020-clg400-1--
+-------------------------------------
+
+For more information on clockInfo.txt clock routing debug file see https://support.xilinx.com/s/article/000035660?language=en_US
+
