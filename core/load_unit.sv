@@ -425,7 +425,7 @@ module load_unit
     // In case of rollback we change the FSM state
     if (rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id) begin
       unique case (state_q)
-        WAIT_GNT: begin
+        WAIT_GNT, WAIT_PAGE_OFFSET: begin
           state_d = IDLE;
           req_port_o.data_req = 1'b0;
           translation_req_o    = 1'b0;

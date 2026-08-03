@@ -28,6 +28,10 @@ module store_unit
     input logic rst_ni,
     // Flush - CONTROLLER
     input logic flush_i,
+    // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
+    input logic rollback_i,
+    // trans if of instruction to rollback - SCOREBOARD
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     input logic stall_st_pending_i,
     // TO_BE_COMPLETED - TO_BE_COMPLETED
@@ -164,7 +168,7 @@ module store_unit
     case (state_q)
       // we got a valid store
       IDLE: begin
-        if (valid_i) begin
+        if (valid_i && !(rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id)) begin
           state_d = VALID_STORE;
           translation_req_o = 1'b1;
           pop_st_o = 1'b1;
@@ -245,6 +249,11 @@ module store_unit
       st_valid = 1'b0;
       state_d  = IDLE;
       valid_o  = 1'b1;
+    end
+
+    if (rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id) begin
+      state_d = IDLE;
+      translation_req_o    = 1'b0;
     end
 
     if (flush_i) state_d = IDLE;

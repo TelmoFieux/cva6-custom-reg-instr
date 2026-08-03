@@ -539,10 +539,11 @@ module cva6
   // --------------
   // COMMIT <-> ID
   // --------------
+
   logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_commit_id;
-  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_commit_id;
-  logic [CVA6Cfg.NrCommitPorts-1:0] we_gpr_commit_id;
-  logic [CVA6Cfg.NrCommitPorts-1:0] we_fpr_commit_id;
+  logic [CVA6Cfg.RegAddrWidth-1:0] commit_csr_waddr_o;
+  logic [CVA6Cfg.XLEN-1:0] commit_csr_rdata_o;
+  logic commit_csr_we_o;
 
   // --------------
   // ISSUE <-> CONTROLLER
@@ -919,18 +920,18 @@ module cva6
       .wt_valid_i              (wt_valid_ex_id),
       .x_we_i                  (x_we_ex_id),
       .x_rd_i                  (x_rd_ex_id),
+      .waddr_i                 (waddr_commit_id),
 
-      .waddr_i              (waddr_commit_id),
-      .wdata_i              (wdata_commit_id),
-      .we_gpr_i             (we_gpr_commit_id),
-      .we_fpr_i             (we_fpr_commit_id),
-      .commit_instr_o       (commit_instr_id_commit),
-      .commit_drop_o        (commit_drop_id_commit),
-      .commit_ack_i         (commit_ack_commit_id),
-      .commit_old_phys_i    (commit_old_phys_i_commit),
-      .commit_new_phys_i    (commit_new_phys_i_commit),
-      .commit_rd_i          (commit_rd_i_commit),
-      .commit_op_i          (commit_op_i_commit),
+      .csr_waddr_i             (commit_csr_waddr_o),
+      .csr_rdata_i             (commit_csr_rdata_o),
+      .csr_we_i                (commit_csr_we_o),
+      .commit_instr_o          (commit_instr_id_commit),
+      .commit_drop_o           (commit_drop_id_commit),
+      .commit_ack_i            (commit_ack_commit_id),
+      .commit_old_phys_i       (commit_old_phys_i_commit),
+      .commit_new_phys_i       (commit_new_phys_i_commit),
+      .commit_rd_i             (commit_rd_i_commit),
+      .commit_op_i             (commit_op_i_commit),
       // Performance Counters
       .stall_issue_o        (stall_issue),
       //RVFI
@@ -1121,9 +1122,9 @@ module cva6
       .commit_op_o       (commit_op_i_commit),
       .commit_macro_ack_o(commit_macro_ack),
       .waddr_o           (waddr_commit_id),
-      .wdata_o           (wdata_commit_id),
-      .we_gpr_o          (we_gpr_commit_id),
-      .we_fpr_o          (we_fpr_commit_id),
+      .csr_waddr_o       (commit_csr_waddr_o),
+      .csr_rdata_o       (commit_csr_rdata_o),
+      .csr_we_o          (commit_csr_we_o),
       .amo_resp_i        (amo_resp),
       .pc_o              (pc_commit),
       .csr_op_o          (csr_op_commit_csr),

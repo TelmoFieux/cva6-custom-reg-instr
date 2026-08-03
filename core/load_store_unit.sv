@@ -418,6 +418,8 @@ module load_store_unit
       .clk_i,
       .rst_ni,
       .flush_i,
+      .rollback_i        (lsu_rollback_i),
+      .rollback_trans_id_i  (lsu_rollback_trans_id_i),
       .stall_st_pending_i,
       .no_st_pending_o,
       .store_buffer_empty_o(store_buffer_empty),

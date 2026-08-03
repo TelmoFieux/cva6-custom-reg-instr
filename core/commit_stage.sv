@@ -52,12 +52,12 @@ module commit_stage
     output logic [CVA6Cfg.NrCommitPorts-1:0] commit_macro_ack_o,
     // Register file write address - ISSUE_STAGE
     output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_o,
-    // Register file write data - ISSUE_STAGE
-    output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_o,
+    // csr write address - ISSUE_STAGE
+    output logic [CVA6Cfg.RegAddrWidth-1:0] csr_waddr_o,
+    // csr read data - ISSUE_STAGE
+    output logic [CVA6Cfg.XLEN-1:0] csr_rdata_o,
     // Register file write enable - ISSUE_STAGE
-    output logic [CVA6Cfg.NrCommitPorts-1:0] we_gpr_o,
-    // Floating point register enable - ISSUE_STAGE
-    output logic [CVA6Cfg.NrCommitPorts-1:0] we_fpr_o,
+    output logic csr_we_o,
     // Result of AMO operation - CACHE
     input amo_resp_t amo_resp_i,
     // TO_BE_COMPLETED - FRONTEND_CSR_REGFILE
@@ -116,7 +116,7 @@ module commit_stage
     assign waddr_o[i] = commit_instr_i[i].rd;
   end
 
-  for (genvar i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin : gen_reg
+  for (genvar i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin : gen_rat_info
     assign commit_old_phys_o[i] = commit_instr_i[i].old_phys;
     assign commit_new_phys_o[i] = commit_instr_i[i].rd;
     assign commit_rd_o[i] = commit_instr_i[i].arch_rd;
@@ -149,14 +149,15 @@ module commit_stage
     commit_ack_o[0] = 1'b0;
     commit_macro_ack[0] = 1'b0;
 
+    csr_we_o = 1'b0;
+    csr_rdata_o = {CVA6Cfg.XLEN{1'b0}};
+    csr_waddr_o = '0;
+
     amo_valid_commit_o = 1'b0;
 
-    we_gpr_o[0] = 1'b0;
-    we_fpr_o = '{default: 1'b0};
     commit_lsu_o = 1'b0;
     commit_csr_o = 1'b0;
     // amos will commit on port 0
-    wdata_o[0] = (CVA6Cfg.RVA && amo_resp_i.ack) ? amo_resp_i.result[CVA6Cfg.XLEN-1:0] : commit_instr_i[0].result;
     csr_op_o = ADD;  // this corresponds to a CSR NOP
     csr_wdata_o = {CVA6Cfg.XLEN{1'b0}};
     fence_i_o = 1'b0;
@@ -181,16 +182,6 @@ module commit_stage
         if (CVA6Cfg.RVZCMP && commit_instr_i[0].is_macro_instr && commit_instr_i[0].is_last_macro_instr)
           commit_macro_ack[0] = 1'b1;
         else commit_macro_ack[0] = 1'b0;
-
-        if (!commit_drop_i[0]) begin
-          // we can definitely write the register file
-          // if the instruction is not committing anything the destination
-          if (CVA6Cfg.FpPresent && ariane_pkg::is_rd_fpr(commit_instr_i[0].op)) begin
-            we_fpr_o[0] = 1'b1;
-          end else begin
-            we_gpr_o[0] = 1'b1;
-          end
-        end
 
         // check whether the instruction we retire was a store
         if (commit_instr_i[0].fu == STORE && !(CVA6Cfg.RVA && instr_0_is_amo)) begin
@@ -221,15 +212,17 @@ module commit_stage
         // throw an exception
         if (commit_instr_i[0].fu == CSR) begin
           // write the CSR file
+          csr_we_o = 1'b1;
           csr_op_o    = commit_instr_i[0].op;
           csr_wdata_o = commit_instr_i[0].result;
+          csr_waddr_o = commit_instr_i[0].rd;
           if (!commit_drop_i[0]) begin
             if (!csr_exception_i.valid) begin
               commit_csr_o = 1'b1;
-              wdata_o[0]   = csr_rdata_i;
+              csr_rdata_o   = csr_rdata_i;
             end else begin
               commit_ack_o[0] = 1'b0;
-              we_gpr_o[0] = 1'b0;
+              csr_we_o = 1'b0;
             end
           end
         end
@@ -310,7 +303,9 @@ module commit_stage
           // flush the pipeline
           flush_commit_o = amo_resp_i.ack;
           amo_valid_commit_o = 1'b1;
-          we_gpr_o[0] = amo_resp_i.ack;
+          // Commenté car je veux pas l'oublier il est probable que les instr AMO ne fonctionne par
+          // en OoO
+          // we_gpr_o[0] = amo_resp_i.ack;
         end
       end
     end
@@ -318,8 +313,6 @@ module commit_stage
     if (CVA6Cfg.NrCommitPorts > 1) begin
       commit_macro_ack[1] = 1'b0;
       commit_ack_o[1]     = 1'b0;
-      we_gpr_o[1]         = 1'b0;
-      wdata_o[1]          = commit_instr_i[1].result;
 
       // -----------------
       // Commit Port 2
@@ -343,10 +336,6 @@ module commit_stage
           commit_ack_o[1] = 1'b1;
 
           if (!commit_drop_i[1]) begin
-            if (CVA6Cfg.FpPresent && ariane_pkg::is_rd_fpr(commit_instr_i[1].op))
-              we_fpr_o[1] = 1'b1;
-            else we_gpr_o[1] = 1'b1;
-
             // additionally check if we are retiring an FPU instruction because we need to make sure that we write all
             // exception flags
             if (CVA6Cfg.FpPresent) begin

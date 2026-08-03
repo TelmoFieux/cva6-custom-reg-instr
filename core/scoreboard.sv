@@ -80,6 +80,10 @@ module scoreboard
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] global_id_i,
     // Results to write back - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata_i,
+    // csr write address - COMMIT_STAGE
+    input logic [CVA6Cfg.RegAddrWidth-1:0] csr_waddr_i,
+    // Register file write enable - COMMIT_STAGE
+    input logic csr_we_i,
     // Exception from a functional unit (e.g.: ld/st exception) - EX_STAGE
     input exception_t [CVA6Cfg.NrWbPorts-1:0] ex_i,
     // Indicates valid results - EX_STAGE
@@ -291,14 +295,25 @@ module scoreboard
       end
 
       //updating write info
-      wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued && wb_id_match;
+      wb_valid_gated[i] = wt_valid_i[i] && mem_q[trans_id_i[i]].issued && wb_id_match && mem_q[trans_id_i[i]].sbe.fu != CSR;
       wb_valid_o = wb_valid_gated;
 
 
       wbaddr_o[i] = mem_q[trans_id_i[i]].sbe.rd;
-      gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
+      gpr_we_o[i] = !is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i] && mem_q[trans_id_i[i]].sbe.fu != CSR;
       fpr_we_o[i] =  is_rd_fpr(mem_q[trans_id_i[i]].sbe.op) && wb_valid_gated[i];
       wb_op_o[i] = mem_q[trans_id_i[i]].sbe.op;
+
+      if (csr_we_i) begin
+        gpr_we_o[FLU_WB] = 1'b1;
+        fpr_we_o[FLU_WB] = 1'b0;
+        wbaddr_o[FLU_WB] = csr_waddr_i;
+        // the op only matters to determine if we update gpr or fpr regsiter in the rs. All CSR op
+        // use gpr so we do not need more granularity
+        wb_op_o[FLU_WB] = CSR_READ;
+        wb_valid_o[FLU_WB] = 1'b1;
+
+      end
     end
 
 

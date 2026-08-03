@@ -144,12 +144,12 @@ module issue_stage
     input logic [4:0] x_rd_i,
     // Destination register in register file - COMMIT_STAGE
     input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
-    // Value to write to register file - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_i,
-    // GPR write enable - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0] we_gpr_i,
-    // FPR write enable - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0] we_fpr_i,
+    // csr write address - COMMIT_STAGE
+    input logic [CVA6Cfg.RegAddrWidth-1:0] csr_waddr_i,
+    // csr read data - COMMIT_STAGE
+    input logic [CVA6Cfg.XLEN-1:0] csr_rdata_i,
+    // Register file write enable - COMMIT_STAGE
+    input logic csr_we_i,
     // Instructions to commit - COMMIT_STAGE
     output scoreboard_entry_t [CVA6Cfg.NrCommitPorts-1:0] commit_instr_o,
     // Instruction is cancelled - COMMIT_STAGE
@@ -562,6 +562,7 @@ module issue_stage
         .rs_restore_en_i            (flush_i),
         .decoded_instr_i            (renamed_instr_i),
         .decoded_instr_ack_i        (decoded_instr_ack_o),
+        .commit_pointer_i           (rvfi_commit_pointer_o),
         .decoded_instr_trans_id_o   (decoded_instr_trans_id_o),
         .decoded_instr_global_id_o  (decoded_instr_global_id_o),
         .decoded_instr_valid_o      (decoded_instr_valid_o)
@@ -704,6 +705,8 @@ module issue_stage
       .trans_id_i              (trans_id_i),
       .global_id_i             (global_id_i),
       .wbdata_i                (wbdata_i),
+      .csr_waddr_i,
+      .csr_we_i,
       .ex_i                    (ex_ex_i),
       .wt_valid_i,
       .x_we_i,
@@ -792,6 +795,8 @@ module issue_stage
       .x_transaction_rejected_o(x_transaction_rejected_o),
       .x_issue_writeback_o     (x_issue_writeback_iro_sb),
       .x_id_o                  (x_id_iro_sb),
+      .csr_we_i,
+      .csr_rdata_i,
       .waddr_i                 (wbaddr_o),
       .wdata_i                 (wbdata_i),
       .we_gpr_i                (gpr_we_o),
