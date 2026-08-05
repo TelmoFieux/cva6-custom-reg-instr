@@ -111,31 +111,31 @@ module scoreboard
 
 
     // physical destination register to rollback - ISSUE_STAGE
-    output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]             rollback_rd_o,
     // global rs id of the instruction to remove - ISSUE_STAGE
-    output logic [CVA6Cfg.GlobalRsIdWidth-1:0]           rollback_id_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]          rollback_id_o,
     // old physical destination register to rollback - ISSUE_STAGE
-    output logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]             rollback_old_phys_o,
     // is rollback active - ISSUE_STAGE
-    output logic                                         rollback_we_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0]                                       rollback_we_o,
     // is rollbacked instr a store - STORE_BUFFER
-    output logic                                         rollback_store_buffer_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0]                                       rollback_store_buffer_o,
     // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
-    output logic                                         rollback_ex_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0]                                       rollback_ex_o,
     // rollback trans id - EX_STAGE
-    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]             rollback_trans_id_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]            rollback_trans_id_o,
     // Has a store been dispatched ? - STORE_UNIT
-    input logic store_dispatched_i,
+    input logic                                                                    store_dispatched_i,
     // Store dispatched trans_id - STORE_UNIT
-    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_i,
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0]                                        store_dispatched_id_i,
     // op of the instruction to rollback - ISSUE_STAGE
-    output fu_op                                         rollback_op_o,
+    output fu_op [CVA6Cfg.RollbackWidth-1:0]                                       rollback_op_o,
     // architectural destination register to rollback - ISSUE_STAGE
-    output logic [31:0]                                  rollback_arch_rd_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][31:0]                                 rollback_arch_rd_o,
     // op of the instructions wrote back - ISSUE_STAGE
-    output fu_op [CVA6Cfg.NrWbPorts-1:0]                 wb_op_o,
+    output fu_op [CVA6Cfg.NrWbPorts-1:0]                                           wb_op_o,
     // is writeback valid - ISSUE_STAGE
-    output logic [CVA6Cfg.NrWbPorts-1:0]                 wb_valid_o
+    output logic [CVA6Cfg.NrWbPorts-1:0]                                           wb_valid_o
 );
 
   // this is the FIFO struct of the issue queue
@@ -375,12 +375,29 @@ module scoreboard
     // End of rollback after branch misprediction
     // ------------
     if (state_q == WALKBACK) begin
-      mem_n[rollback_pointer_q].issued           = 1'b0;
-      mem_n[rollback_pointer_q].cancelled        = 1'b0;
-      mem_n[rollback_pointer_q].sbe.valid        = 1'b0;
-      mem_n[rollback_pointer_q].sbe.ex.valid     = 1'b0;
-      mem_n[rollback_pointer_q].lsu_dispatched   = 1'b0;
-      mem_n[rollback_pointer_q].store_dispatched = 1'b0;
+
+      automatic logic end_of_rollback;
+      end_of_rollback = 1'b0;
+
+      for (int unsigned i = 0 ; i < CVA6Cfg.RollbackWidth ; i++) begin
+        automatic logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_index;
+
+        rollback_index = rollback_pointer_q - i;
+
+        if (!end_of_rollback) begin
+          mem_n[rollback_index].issued           = 1'b0;
+          mem_n[rollback_index].cancelled        = 1'b0;
+          mem_n[rollback_index].sbe.valid        = 1'b0;
+          mem_n[rollback_index].sbe.ex.valid     = 1'b0;
+          mem_n[rollback_index].lsu_dispatched   = 1'b0;
+          mem_n[rollback_index].store_dispatched = 1'b0;
+        end
+
+        if (rollback_index == bmiss_trans_id_q) begin
+          end_of_rollback = 1'b1;
+        end
+
+      end
     end
 
   end
@@ -401,7 +418,7 @@ module scoreboard
     issue_pointer_n = issue_pointer[num_issue];
     if (flush_i) begin
       issue_pointer_n = '0;
-    end else if (rollback_pointer_q == bmiss_trans_id_q && state_q == WALKBACK) begin
+    end else if (state_n == NORMAL && state_q == WALKBACK) begin
       issue_pointer_n = bmiss_trans_id_q;
     end
   end
@@ -416,13 +433,14 @@ module scoreboard
     rollback_pointer_n = rollback_pointer_q;
     bmiss_trans_id_n    = bmiss_trans_id_q;
     rollback_rd_o = '0;
-    rollback_we_o = 1'b0;
-    rollback_store_buffer_o = 1'b0;
-    rollback_ex_o = 1'b0;
+    rollback_we_o = '0;
+    rollback_store_buffer_o = '0;
+    rollback_ex_o = '0;
     rollback_id_o = '0;
     rollback_old_phys_o = '0;
-    rollback_op_o = ADD;
+    rollback_op_o ='{default: ADD};
     rollback_trans_id_o = '0;
+    rollback_arch_rd_o = '0;
 
     if (flush_i) begin
       state_n            = NORMAL;
@@ -444,18 +462,26 @@ module scoreboard
           end
         end
         WALKBACK : begin
-          rollback_rd_o = mem_q[rollback_pointer_q].sbe.rd;
-          rollback_id_o = mem_q[rollback_pointer_q].sbe.global_rs_id;
-          rollback_we_o = mem_q[rollback_pointer_q].issued;
-          rollback_store_buffer_o = mem_q[rollback_pointer_q].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_pointer_q);
-          rollback_ex_o = mem_q[rollback_pointer_q].issued;
-          rollback_old_phys_o = mem_q[rollback_pointer_q].sbe.old_phys;
-          rollback_trans_id_o = mem_q[rollback_pointer_q].sbe.trans_id;
-          rollback_arch_rd_o = mem_q[rollback_pointer_q].sbe.arch_rd;
-          rollback_op_o = mem_q[rollback_pointer_q].sbe.op;
-          rollback_pointer_n = rollback_pointer_q - 1;
-          if (rollback_pointer_q == bmiss_trans_id_q) begin
-            state_n = NORMAL;
+          for (int unsigned i = 0 ; i < CVA6Cfg.RollbackWidth ; i++) begin
+            automatic logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_index;
+            rollback_index = rollback_pointer_q - i;
+            rollback_rd_o[i] = mem_q[rollback_index].sbe.rd;
+            rollback_id_o[i] = mem_q[rollback_index].sbe.global_rs_id;
+            rollback_we_o[i] = mem_q[rollback_index].issued && state_n != NORMAL;
+            rollback_store_buffer_o[i] = (mem_q[rollback_index].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_index)) && state_n != NORMAL;
+            rollback_ex_o[i] = mem_q[rollback_index].issued && state_n != NORMAL;
+            rollback_old_phys_o[i] = mem_q[rollback_index].sbe.old_phys;
+            rollback_trans_id_o[i] = mem_q[rollback_index].sbe.trans_id;
+            rollback_arch_rd_o[i] = mem_q[rollback_index].sbe.arch_rd;
+            rollback_op_o[i] = mem_q[rollback_index].sbe.op;
+            if (rollback_index == bmiss_trans_id_q) begin
+              state_n = NORMAL;
+              rollback_pointer_n = rollback_index;
+            end
+          end
+
+          if (state_n != NORMAL) begin
+            rollback_pointer_n = rollback_pointer_q - CVA6Cfg.RollbackWidth;
           end
         end
       endcase

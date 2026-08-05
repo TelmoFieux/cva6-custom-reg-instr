@@ -447,9 +447,9 @@ module cva6
   // LSU
   logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_id_ex;
   logic lsu_ready_ex_id;
-  logic rollback_store_buffer;
-  logic rollback_ex;
-  logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id;
+  logic [CVA6Cfg.RollbackWidth-1:0] rollback_store_buffer;
+  logic [CVA6Cfg.RollbackWidth-1:0] rollback_ex;
+  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id;
   logic store_dispatched;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id;
 

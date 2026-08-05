@@ -153,6 +153,8 @@ package config_pkg;
     int unsigned                 RegAddrWidth;
     // Width of gobal reservation station id used to track age
     int unsigned                 GlobalRsIdWidth;
+    // Number of instruction rollbacked per cycle
+    int unsigned                 RollbackWidth;
     // AXI User width
     int unsigned                 AxiUserWidth;
     // AXI burst in write
@@ -252,6 +254,7 @@ package config_pkg;
     int unsigned AxiUserWidth;
     int unsigned RegAddrWidth;
     int unsigned GlobalRsIdWidth;
+    int unsigned RollbackWidth;
     int unsigned MEM_TID_WIDTH;
     int unsigned NrLoadBufEntries;
     bit          RVF;

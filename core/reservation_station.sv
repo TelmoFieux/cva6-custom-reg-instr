@@ -44,10 +44,10 @@ module reservation_station
     input  logic [CVA6Cfg.NrWbPorts-1:0]                                 wb_valid_i,
     input  logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 wb_rd_i, // dest reg of the entry to remove
     input  fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
-    input  logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           rollback_id_i, // id of the entry to rollback
-    input  logic                                                         rollback_en_i, // is rollback enabled
-    input  logic [ADDR_WIDTH-1:0]                                        rollback_rd_i, // architectural register to rollback
-    input  fu_op                                                         rollback_op_i, // architectural register to rollback
+    input  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]rollback_id_i, // id of the entry to rollback
+    input  logic [CVA6Cfg.RollbackWidth-1:0]                             rollback_en_i, // is rollback enabled
+    input  logic [CVA6Cfg.RollbackWidth-1:0][ADDR_WIDTH-1:0]             rollback_rd_i, // architectural register to rollback
+    input  fu_op [CVA6Cfg.RollbackWidth-1:0]                             rollback_op_i, // op of the instr to rollback
     input  logic                                                         rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]                 decoded_instr_i,
@@ -223,15 +223,17 @@ module reservation_station
     end
 
     // updating dependencies during rollback
-    if (rollback_en_i) begin
-      if (FPR_ENABLED) begin
-        if (is_rd_fpr(rollback_op_i)) begin
-          is_result_available_fpr_n[rollback_rd_i] = 1'b1;
+    for (int unsigned i = 0; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_en_i[i]) begin
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(rollback_op_i[i])) begin
+            is_result_available_fpr_n[rollback_rd_i[i]] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[rollback_rd_i[i]] = 1'b1;
+          end
         end else begin
-          is_result_available_gpr_n[rollback_rd_i] = 1'b1;
+          is_result_available_gpr_n[rollback_rd_i[i]] = 1'b1;
         end
-      end else begin
-        is_result_available_gpr_n[rollback_rd_i] = 1'b1;
       end
     end
 
@@ -247,15 +249,19 @@ module reservation_station
       allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_ack_i[1] && empty_mask[1] == 1'b0;
 
       for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-        // instr has been issued
+        // instr has been dispatched
         if (rm_i[j] && rm_id_i[j] == rs_q.rs_table[i].global_rs_id && !rs_q.free_entries[i]) begin
             rs_n.free_entries[i] = 1'b1;
         end
-        // rollback
-        else if (rollback_en_i && rollback_id_i == rs_q.rs_table[i].global_rs_id) begin
-            rs_n.free_entries[i] = 1'b1;
+      end
+
+      // rollback
+      for (int unsigned j = 0; j<CVA6Cfg.RollbackWidth ; j++) begin
+        if (rollback_en_i[j] && rollback_id_i[j] == rs_q.rs_table[i].global_rs_id) begin
+          rs_n.free_entries[i] = 1'b1;
         end
       end
+
 
       //First we check RAW hazard between the 2 newly fetched instr
       if (decoded_instr_ack_i == '1) begin

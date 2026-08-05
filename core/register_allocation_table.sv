@@ -33,9 +33,9 @@ module register_allocation_table
     input fu_op [CVA6Cfg.NrIssuePorts-1:0]                    commit_op_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_new_phys_i,
-    input logic [ADDR_WIDTH-1:0]                              rollback_rd_i, // architectural register to rollback
-    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // physical register to rollback
-    input logic                                               rollback_we_i, // rollback is enabled
+    input logic [CVA6Cfg.RollbackWidth-1:0][31:0]             rollback_rd_i, // architectural register to rollback
+    input logic [CVA6Cfg.RollbackWidth-1:0][ADDR_WIDTH-1:0]   rollback_old_phys_i, // physical register to rollback
+    input logic [CVA6Cfg.RollbackWidth-1:0]                   rollback_we_i, // rollback is enabled
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i, //May be unnecessary to pass the entirety of the struct scoreboard_entry_t
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
@@ -147,9 +147,11 @@ module register_allocation_table
     end
 
     //rollback
-    if (rollback_we_i && (FPR_RAT || rollback_rd_i != '0)) begin
-      rat_n.free_regs[rat_n.rat[rollback_rd_i]] = 1'b1;
-      rat_n.rat[rollback_rd_i] = rollback_old_phys_i;
+    for (int unsigned i = 0; i< CVA6Cfg.RollbackWidth ; i++ ) begin
+      if (rollback_we_i[i] && (FPR_RAT || rollback_rd_i[i] != '0)) begin
+        rat_n.free_regs[rat_n.rat[rollback_rd_i[i]]] = 1'b1;
+        rat_n.rat[rollback_rd_i[i]] = rollback_old_phys_i[i];
+      end
     end
 
     if (rat_restore_en_i) begin

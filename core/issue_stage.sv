@@ -175,11 +175,11 @@ module issue_stage
     // Information dedicated to RVFI - RVFI
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs2_o,
     // is rollbacked instr a store - STORE_BUFFER
-    output logic                                              rollback_store_buffer_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0] rollback_store_buffer_o,
     // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
-    output logic                                         rollback_ex_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0] rollback_ex_o,
     // rollback trans id - EX_STAGE
-    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]             rollback_trans_id_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_o,
     // Has a store been dispatched ? - STORE_UNIT
     input logic store_dispatched_i,
     // Store dispatched trans_id - STORE_UNIT
@@ -232,18 +232,18 @@ module issue_stage
   logic [CVA6Cfg.NrIssuePorts-1:0] empty_gpr,empty_fpr;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] renamed_instr_i;
   rat_table_t                                   gpr_commit_rat, fpr_commit_rat;
-  logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_i;
-  logic [31:0]                                  rollback_arch_rd_i;
-  logic [CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_i;
-  logic                                         rollback_we_i;
-  fu_op                                         rollback_op_i;
-  logic                                         gpr_rollback_we_i;
+  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_i;
+  logic [CVA6Cfg.RollbackWidth-1:0][31:0]                                  rollback_arch_rd_i;
+  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_i;
+  logic [CVA6Cfg.RollbackWidth-1:0]                                        rollback_we_i;
+  fu_op [CVA6Cfg.RollbackWidth-1:0]                                        rollback_op_i;
+  logic [CVA6Cfg.RollbackWidth-1:0]                                        gpr_rollback_we_i;
+  logic [CVA6Cfg.RollbackWidth-1:0]                                        fpr_rollback_we_i;
   logic [CVA6Cfg.NrIssuePorts-1:0]              issue_instr_ack;
   logic [CVA6Cfg.NrIssuePorts-1:0]              issue_fpr_we_i;
-  logic                                         fpr_rollback_we_i;
 
 
-  assign rollback_en_o = rollback_we_i;
+  assign rollback_en_o = |rollback_we_i;
   if (!CVA6Cfg.FpPresent) begin
     assign empty_fpr = '0;
     assign issue_fpr_we_i = '0;
@@ -256,7 +256,10 @@ module issue_stage
       issue_we_i = '1;
       gpr_rollback_we_i = rollback_we_i;
     end else begin
-      gpr_rollback_we_i = is_rd_fpr(rollback_op_i) ? 1'b0 : rollback_we_i;
+      for (int unsigned i = 0 ; i < CVA6Cfg.RollbackWidth ; i++) begin
+        gpr_rollback_we_i[i] = is_rd_fpr(rollback_op_i[i]) ? 1'b0 : rollback_we_i[i];
+      end
+
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
         issue_we_i[i] = !is_rd_fpr(decoded_instr_i[i].op);
       end
@@ -329,7 +332,10 @@ module issue_stage
 
 
     always_comb begin : fpr_we
-      fpr_rollback_we_i = (rollback_we_i && is_rd_fpr(rollback_op_i)) ? 1'b1 : 1'b0;
+      for (int unsigned i = 0 ; i < CVA6Cfg.RollbackWidth ; i++) begin
+        fpr_rollback_we_i[i] = (rollback_we_i[i] && is_rd_fpr(rollback_op_i[i])) ? 1'b1 : 1'b0;
+      end
+
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
         issue_fpr_we_i[i] = is_rd_fpr(decoded_instr_i[i].op);
       end
@@ -431,7 +437,7 @@ module issue_stage
   // ---------------------------------------------------------
 
   localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
-  logic [CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
+  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
 
@@ -467,7 +473,7 @@ module issue_stage
       for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin : g_write_enable
         case (fu)
           LOAD_STORE :
-            assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_we_i;
+            assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_en_o;
 
           FLU :
             assign we_i[j] =(((decoded_instr_i[1].fu == ALU || decoded_instr_i[1].fu == CSR || decoded_instr_i[1].fu == MULT || decoded_instr_i[1].fu == CTRL_FLOW)
@@ -478,7 +484,7 @@ module issue_stage
                           ((j == 0) ? 1'b1 : 1'b0) :
                       decoded_instr_i[j].fu == ALU
                       || decoded_instr_i[j].fu == CSR || decoded_instr_i[j].fu == MULT
-                      || decoded_instr_i[j].fu == CTRL_FLOW || decoded_instr_i[j].fu == NONE) && !rollback_we_i;
+                      || decoded_instr_i[j].fu == CTRL_FLOW || decoded_instr_i[j].fu == NONE) && !rollback_en_o;
 
           // Since ALU2 and FPU share the same Wb port we only write instr to this rs if
           // it is an fpu instr or it is an alu instruction and we already wrote one flu instr in
@@ -491,10 +497,10 @@ module issue_stage
                       ((decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
                           && decoded_instr_i[1].fu == ALU) ?
                           ((j == 1) ? 1'b1 : 1'b0) :
-                      decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_we_i;
+                      decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_en_o;
 
           F_CVXIF :
-            assign we_i[j] = decoded_instr_i[j].fu == CVXIF && !rollback_we_i;
+            assign we_i[j] = decoded_instr_i[j].fu == CVXIF && !rollback_en_o;
 
           default :
             assign we_i[j] = '0;

@@ -34,9 +34,9 @@ module load_unit
     // Flush signal - CONTROLLER
     input logic flush_i,
     // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
-    input logic rollback_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0] rollback_i,
     // trans if of instruction to rollback - SCOREBOARD
-    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
     // Load request is valid - LSU_BYPASS
     input logic valid_i,
     // Load request input - LSU_BYPASS
@@ -178,8 +178,10 @@ module load_unit
 
     // squash entry on rollback
     for (int unsigned i = 0; i < CVA6Cfg.NrLoadBufEntries; i++) begin
-      if (ldbuf_valid_q[i] && ldbuf_q[i].trans_id == rollback_trans_id_i && rollback_i) begin
-        ldbuf_flushed_d[i] = '1;
+      for (int unsigned j = 0 ; j<CVA6Cfg.RollbackWidth ; j++) begin
+        if (ldbuf_valid_q[i] && ldbuf_q[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
+          ldbuf_flushed_d[i] = '1;
+        end
       end
     end
   end
@@ -263,8 +265,14 @@ module load_unit
     // In IDLE and SEND_TAG states, this unit can accept a new load request
     // when the load buffer is not full or if there is a response and the
     // load buffer is in fall-through mode
-    accept_req = (valid_i && (!ldbuf_full || (LDBUF_FALLTHROUGH && ldbuf_r)))
-             && !(rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id);
+    accept_req = (valid_i && (!ldbuf_full || (LDBUF_FALLTHROUGH && ldbuf_r)));
+
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_i[i] && rollback_trans_id_i[i] == lsu_ctrl_i.trans_id) begin
+        accept_req = 1'b0;
+      end
+    end
+
 
     case (state_q)
       IDLE: begin
@@ -423,19 +431,21 @@ module load_unit
     endcase
 
     // In case of rollback we change the FSM state
-    if (rollback_i && rollback_trans_id_i == lsu_ctrl_i.trans_id) begin
-      unique case (state_q)
-        WAIT_GNT, WAIT_PAGE_OFFSET: begin
-          state_d = IDLE;
-          req_port_o.data_req = 1'b0;
-          translation_req_o    = 1'b0;
-        end
-        SEND_TAG, ABORT_TRANSACTION, ABORT_TRANSACTION_NI,
-        WAIT_TRANSLATION, WAIT_WB_EMPTY: begin
-          state_d = IDLE;
-        end
-        default: ;
-      endcase
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_i[i] && rollback_trans_id_i[i] == lsu_ctrl_i.trans_id && lsu_ctrl_i.valid) begin
+        unique case (state_q)
+          WAIT_GNT, WAIT_PAGE_OFFSET: begin
+            state_d = IDLE;
+            req_port_o.data_req = 1'b0;
+            translation_req_o    = 1'b0;
+          end
+          SEND_TAG, ABORT_TRANSACTION, ABORT_TRANSACTION_NI,
+          WAIT_TRANSLATION, WAIT_WB_EMPTY: begin
+            state_d = IDLE;
+          end
+          default: ;
+        endcase
+      end
     end
 
     // if we just flushed and the queue is not empty or we are getting an rvalid this cycle wait in a extra stage

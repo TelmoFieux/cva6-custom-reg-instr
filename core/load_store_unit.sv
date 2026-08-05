@@ -48,9 +48,9 @@ module load_store_unit
     // Load Store Unit instruction is valid - ISSUE_STAGE
     input logic lsu_valid_i,
     // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
-    input logic lsu_rollback_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0] lsu_rollback_i,
     // trans if of instruction to rollback - SCOREBOARD
-    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] lsu_rollback_trans_id_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] lsu_rollback_trans_id_i,
 
     // Load transaction ID - ISSUE_STAGE
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0] load_trans_id_o,
@@ -72,7 +72,7 @@ module load_store_unit
     // Store exception - ISSUE_STAGE
     output exception_t store_exception_o,
     // do we need to rollback the store buffer - SCOREBOARD
-    input logic store_rollback_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0] store_rollback_i,
     // Has a store been dispatched ? - SCOREBOARD
     output logic store_dispatched_o,
     // Store dispatched trans_id - SCOREBOARD

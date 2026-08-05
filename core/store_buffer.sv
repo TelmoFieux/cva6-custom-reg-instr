@@ -25,7 +25,7 @@ module store_buffer
     input logic rst_ni,  // Asynchronous reset active low
     input logic flush_i,  // if we flush we need to pause the transactions on the memory
                           // otherwise we will run in a deadlock with the memory arbiter
-    input logic rollback_en_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0] rollback_en_i,
     input logic stall_st_pending_i,  // Stall issuing non-speculative request
     output logic         no_st_pending_o, // non-speculative queue is empty (e.g.: everything is committed to the memory hierarchy)
     output logic         store_buffer_empty_o, // there is no store pending in neither the speculative unit or the non-speculative queue
@@ -83,6 +83,7 @@ module store_buffer
   // ----------------------------------------
   always_comb begin : core_if
     automatic logic [$clog2(DEPTH_SPEC):0] speculative_status_cnt;
+    automatic logic [$clog2(DEPTH_SPEC)-1:0] rollback_pointer;
     speculative_status_cnt      = speculative_status_cnt_q;
 
     // default assignments
@@ -114,10 +115,18 @@ module store_buffer
 
     speculative_status_cnt_n = speculative_status_cnt;
 
-    if (rollback_en_i) begin
-     speculative_write_pointer_n = speculative_write_pointer_q - 1'b1;
-     speculative_queue_n[speculative_write_pointer_n].valid = 1'b0;
-     speculative_status_cnt_n = speculative_status_cnt_q - 1;
+    rollback_pointer = speculative_write_pointer_n;
+
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_en_i[i]) begin
+        rollback_pointer = rollback_pointer - 1'b1;
+        speculative_queue_n[rollback_pointer].valid = 1'b0;
+        speculative_status_cnt_n = speculative_status_cnt_n - 1;
+      end
+    end
+
+    if (|rollback_en_i) begin
+      speculative_write_pointer_n = rollback_pointer;
     end
 
     // when we flush evict the speculative stores

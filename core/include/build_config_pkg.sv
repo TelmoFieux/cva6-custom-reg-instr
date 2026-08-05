@@ -58,6 +58,7 @@ package build_config_pkg;
     cfg.AxiUserWidth = CVA6Cfg.AxiUserWidth;
     cfg.RegAddrWidth = CVA6Cfg.RegAddrWidth;
     cfg.GlobalRsIdWidth = CVA6Cfg.GlobalRsIdWidth;
+    cfg.RollbackWidth = CVA6Cfg.RollbackWidth;
     cfg.MEM_TID_WIDTH = CVA6Cfg.MemTidWidth;
     cfg.NrLoadBufEntries = CVA6Cfg.NrLoadBufEntries;
     cfg.RVF = CVA6Cfg.RVF;
