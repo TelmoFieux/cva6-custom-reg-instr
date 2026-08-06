@@ -41,6 +41,8 @@ module reservation_station
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              we_i,
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              rm_i, // do we remove the entry
     input  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i, // id of the entry to remove
+    input  fu_op [CVA6Cfg.NrIssuePorts-1:0]                              rm_op_i, // op of the entry to remove
+    input  logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]              rm_rd_i, // dest reg addr of the entry to remove
     input  logic [CVA6Cfg.NrWbPorts-1:0]                                 wb_valid_i,
     input  logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 wb_rd_i, // dest reg of the entry to remove
     input  fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
@@ -119,6 +121,7 @@ module reservation_station
   logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] RAW_updated_regs;
   logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] updated_regs;
   logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] forwarding_updated_regs;
+  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] speculative_updated_regs;
 
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
     // lsu instr must be strictly issued in order so we label all of them as valid
@@ -191,6 +194,21 @@ module reservation_station
       end
     end
 
+    //updating based on speculative wakeup
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (rm_i[i] && instr_cycle_count(rm_op_i[i]) == 1'b1) begin
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(rm_op_i[i])) begin
+            is_result_available_fpr_n[rm_rd_i[i]] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[rm_rd_i[i]] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[rm_rd_i[i]] = 1'b1;
+        end
+      end
+    end
+
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (decoded_instr_ack_i[i]) begin
         if (we_i[i] && empty_mask[i] == 1'b0) begin
@@ -240,6 +258,7 @@ module reservation_station
     RAW_updated_regs = rs_q.valid_regs;
     updated_regs = rs_q.valid_regs;
     forwarding_updated_regs = '0;
+    speculative_updated_regs = '0;
 
     //removing instr after it was selected to be executed
     //or because of rollback triggered by exception or branch miss.
@@ -280,6 +299,71 @@ module reservation_station
         end
       end else begin
         RAW_updated_regs[i] = '1;
+      end
+
+      // speculative wakeup
+      for (int k = 0; k < CVA6Cfg.NrIssuePorts; k++) begin
+        if (rm_i[k] && instr_cycle_count(rm_op_i[k]) == 1'b1) begin
+          if (!FPR_ENABLED) begin
+            if (allocated_by_p0) begin
+              if (rm_rd_i[k] == decoded_instr_i[0].rs1) speculative_updated_regs[i][0] = 1'b1;
+              if (rm_rd_i[k] == decoded_instr_i[0].rs2) speculative_updated_regs[i][1] = 1'b1;
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm) begin
+                if (rm_rd_i[k] == decoded_instr_i[0].result) speculative_updated_regs[i][2] = 1'b1;
+              end
+            end else if (allocated_by_p1) begin
+              if (rm_rd_i[k] == decoded_instr_i[1].rs1) speculative_updated_regs[i][0] = 1'b1;
+              if (rm_rd_i[k] == decoded_instr_i[1].rs2) speculative_updated_regs[i][1] = 1'b1;
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
+                if (rm_rd_i[k] == decoded_instr_i[1].result) speculative_updated_regs[i][2] = 1'b1;
+              end
+            end else begin
+              if (rm_rd_i[k] == rs_q.rs_table[i].rs1) speculative_updated_regs[i][0] = 1'b1;
+              if (rm_rd_i[k] == rs_q.rs_table[i].rs2) speculative_updated_regs[i][1] = 1'b1;
+              if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm) begin
+                if (rm_rd_i[k] == rs_q.rs_table[i].result) speculative_updated_regs[i][2] = 1'b1;
+              end
+            end
+          end else begin
+            if (allocated_by_p0) begin
+              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[0].op)) begin
+                if (rm_rd_i[k] == decoded_instr_i[0].rs1) speculative_updated_regs[i][0] = 1'b1;
+              end
+              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[0].op)) begin
+                if (rm_rd_i[k] == decoded_instr_i[0].rs2) speculative_updated_regs[i][1] = 1'b1;
+              end
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm) begin
+                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[0].op)) begin
+                  if (rm_rd_i[k] == decoded_instr_i[0].result) speculative_updated_regs[i][2] = 1'b1;
+                end
+              end
+            end else if (allocated_by_p1) begin
+              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[1].op)) begin
+                if (rm_rd_i[k] == decoded_instr_i[1].rs1) speculative_updated_regs[i][0] = 1'b1;
+              end
+              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[1].op)) begin
+                if (rm_rd_i[k] == decoded_instr_i[1].rs2) speculative_updated_regs[i][1] = 1'b1;
+              end
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
+                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[1].op)) begin
+                  if (rm_rd_i[k] == decoded_instr_i[1].result) speculative_updated_regs[i][2] = 1'b1;
+                end
+              end
+            end else begin
+              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(rs_q.rs_table[i].op)) begin
+                if (rm_rd_i[k] == rs_q.rs_table[i].rs1) speculative_updated_regs[i][0] = 1'b1;
+              end
+              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(rs_q.rs_table[i].op)) begin
+                if (rm_rd_i[k] == rs_q.rs_table[i].rs2) speculative_updated_regs[i][1] = 1'b1;
+              end
+              if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm) begin
+                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(rs_q.rs_table[i].op)) begin
+                  if (rm_rd_i[k] == rs_q.rs_table[i].result) speculative_updated_regs[i][2] = 1'b1;
+                end
+              end
+            end
+          end
+        end
       end
 
       //Then we update based on the retired instr that finished executing
@@ -345,8 +429,6 @@ module reservation_station
               end
             end
           end
-        end else begin
-          forwarding_updated_regs[i] = '0;
         end
       end
 
@@ -389,18 +471,36 @@ module reservation_station
 
 
       //In the end we select the right calculated value for valid_regs
-      //First we check select RAW result if valid then forwarding result and finally default result
+      //First we check select RAW result if valid then speculative results, then forwarding result and finally default result
       if (!rs_restore_en_i) begin
         if (allocated_by_p1) begin
-          rs_n.valid_regs[i][0] = RAW_updated_regs[i][0] == 1'b1 ? (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0]) : RAW_updated_regs[i][0];
-          rs_n.valid_regs[i][1] = RAW_updated_regs[i][1] == 1'b1 ? (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1]) : RAW_updated_regs[i][1];
+          rs_n.valid_regs[i][0] = RAW_updated_regs[i][0] == 1'b1 ?
+            (speculative_updated_regs[i][0] == 1'b0 ?
+              (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0])
+            : speculative_updated_regs[i][0])
+          : RAW_updated_regs[i][0];
+          rs_n.valid_regs[i][1] = RAW_updated_regs[i][1] == 1'b1 ?
+            (speculative_updated_regs[i][1] == 1'b0 ?
+              (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1])
+            : speculative_updated_regs[i][1])
+          : RAW_updated_regs[i][1];
           if (NR_READ_PORTS == 3)
-            rs_n.valid_regs[i][2] = RAW_updated_regs[i][2] == 1'b1 ? (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2]) : RAW_updated_regs[i][2];
+            rs_n.valid_regs[i][2] = RAW_updated_regs[i][2] == 1'b1 ?
+              (speculative_updated_regs[i][2] == 1'b0 ?
+                (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2])
+              : speculative_updated_regs[i][2])
+            : RAW_updated_regs[i][2];
         end else begin
-          rs_n.valid_regs[i][0] = forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0];
-          rs_n.valid_regs[i][1] = forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1];
+          rs_n.valid_regs[i][0] = speculative_updated_regs[i][0] == 1'b0 ?
+            (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0])
+          : speculative_updated_regs[i][0];
+          rs_n.valid_regs[i][1] = speculative_updated_regs[i][1] == 1'b0 ?
+            (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1])
+          : speculative_updated_regs[i][1];
           if (NR_READ_PORTS == 3)
-            rs_n.valid_regs[i][2] = forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2];
+            rs_n.valid_regs[i][2] = speculative_updated_regs[i][2] == 1'b0 ?
+              (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2])
+            : speculative_updated_regs[i][2];
         end
       end else begin
         rs_n.valid_regs[i][0] = updated_regs[i][0];

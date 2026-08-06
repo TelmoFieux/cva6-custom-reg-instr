@@ -143,7 +143,6 @@ module scoreboard
     logic issued;  // this bit indicates whether we issued this instruction e.g.: if it is valid
     logic cancelled;  // this instruction was cancelled (speculative scoreboard)
     logic is_rd_fpr_flag;  // redundant meta info, added for speed
-    logic lsu_dispatched; // instr is a store/load and was sent to execute
     logic store_dispatched; // instr is a store and was sent to store buffer
     scoreboard_entry_t sbe;  // this is the score board entry we will send to ex
   } sb_mem_t;
@@ -240,7 +239,6 @@ module scoreboard
             issued: 1'b1,
             cancelled: 1'b0,
             is_rd_fpr_flag: CVA6Cfg.FpPresent && ariane_pkg::is_rd_fpr(decoded_instr_i[i].op),
-            lsu_dispatched: 1'b0,
             store_dispatched: 1'b0,
             sbe: decoded_instr_i[i]
         };
@@ -318,11 +316,6 @@ module scoreboard
 
 
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      // memory operation enters lsu
-      if (fu_data_i[i].fu inside {LOAD, STORE} && lsu_valid_i[i] ) begin
-        mem_n[fu_data_i[i].trans_id].lsu_dispatched = 1'b1;
-      end
-
       // store operation enters store buffer
       if (store_dispatched_i) begin
         mem_n[store_dispatched_id_i].store_dispatched = 1'b1;
@@ -350,7 +343,6 @@ module scoreboard
         mem_n[commit_pointer_q[i]].issued           = 1'b0;
         mem_n[commit_pointer_q[i]].cancelled        = 1'b0;
         mem_n[commit_pointer_q[i]].sbe.valid        = 1'b0;
-        mem_n[commit_pointer_q[i]].lsu_dispatched   = 1'b0;
         mem_n[commit_pointer_q[i]].store_dispatched = 1'b0;
       end
     end
@@ -366,7 +358,6 @@ module scoreboard
         mem_n[i].cancelled        = 1'b0;
         mem_n[i].sbe.valid        = 1'b0;
         mem_n[i].sbe.ex.valid     = 1'b0;
-        mem_n[i].lsu_dispatched   = 1'b0;
         mem_n[i].store_dispatched = 1'b0;
       end
     end
@@ -389,7 +380,6 @@ module scoreboard
           mem_n[rollback_index].cancelled        = 1'b0;
           mem_n[rollback_index].sbe.valid        = 1'b0;
           mem_n[rollback_index].sbe.ex.valid     = 1'b0;
-          mem_n[rollback_index].lsu_dispatched   = 1'b0;
           mem_n[rollback_index].store_dispatched = 1'b0;
         end
 

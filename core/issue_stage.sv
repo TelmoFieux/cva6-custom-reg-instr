@@ -469,6 +469,8 @@ module issue_stage
 
       logic [CVA6Cfg.NrIssuePorts-1:0] rm_i;
       logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
+      fu_op [CVA6Cfg.NrIssuePorts-1:0] rm_op_i;
+      logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] rm_rd_i;
 
       for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin : g_write_enable
         case (fu)
@@ -520,6 +522,8 @@ module issue_stage
         for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
           assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j] & (!flush_unissued_instr_i && !flush_i);
           assign rm_id_i[j] = issue_instr_sb_iro[j].global_rs_id;
+          assign rm_op_i[j] = issue_instr_sb_iro[j].op;
+          assign rm_rd_i[j] = issue_instr_sb_iro[j].rd;
       end
 
       case (fu)
@@ -558,6 +562,8 @@ module issue_stage
         .we_i                       (we_i),
         .rm_i                       (rm_i),
         .rm_id_i                    (rm_id_i),
+        .rm_op_i                    (rm_op_i),
+        .rm_rd_i                    (rm_rd_i),
         .wb_valid_i                 (wb_valid_o),
         .wb_rd_i                    (wbaddr_o),
         .wb_op_i                    (wb_op_o),
