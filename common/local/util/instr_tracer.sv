@@ -25,7 +25,7 @@ module instr_tracer #(
   parameter type exception_t = logic,
   parameter interrupts_t INTERRUPTS = '0
 )(
-    input logic                    pck,
+  input logic                    pck,
   input logic                    rstn,
   input logic                    flush_unissued,
   input logic                    flush_all,
@@ -52,6 +52,22 @@ module instr_tracer #(
 
   input logic[CVA6Cfg.XLEN-1:0] hart_id_i
 );
+
+  // =========================================================================
+  // AJOUT : Création des alias de types paramétrés pour résoudre l'erreur vopt
+  // =========================================================================
+  typedef instr_trace_item #(
+    .CVA6Cfg(CVA6Cfg),
+    .bp_resolve_t(bp_resolve_t),
+    .scoreboard_entry_t(scoreboard_entry_t)
+  ) iti_t;
+
+  typedef ex_trace_item #(
+    .CVA6Cfg(CVA6Cfg),
+    .interrupts_t(interrupts_t),
+    .INTERRUPTS(INTERRUPTS)
+  ) eti_t;
+  // =========================================================================
 
   // keep the decoded instructions in a queue
   logic [31:0] decode_queue [$];
@@ -219,11 +235,7 @@ module instr_tracer #(
 
   function automatic void printInstr(scoreboard_entry_t sbe, logic [31:0] instr, logic [63:0] result, logic [CVA6Cfg.PLEN-1:0] paddr, riscv::priv_lvl_t priv_lvl, logic debug_mode, bp_resolve_t bp);
     // 1. Toutes les déclarations de variables impérativement en haut
-    instr_trace_item #(
-      .CVA6Cfg(CVA6Cfg),
-      .bp_resolve_t(bp_resolve_t),
-      .scoreboard_entry_t(scoreboard_entry_t)
-    ) iti;
+    iti_t iti;
     string print_instr;
 
     // 2. Code exécutable et affectations ensuite
@@ -238,11 +250,7 @@ module instr_tracer #(
 
   function automatic void printException(logic [CVA6Cfg.VLEN-1:0] pc, logic [63:0] cause, logic [63:0] tval);
     // 1. Toutes les déclarations de variables impérativement en haut
-    ex_trace_item #(
-      .CVA6Cfg(CVA6Cfg),
-      .interrupts_t(interrupts_t),
-      .INTERRUPTS(INTERRUPTS)
-    ) eti;
+    eti_t eti;
     string print_ex;
 
     // 2. Code exécutable et affectations ensuite

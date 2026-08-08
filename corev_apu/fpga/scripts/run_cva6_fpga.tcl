@@ -1,5 +1,5 @@
 # Copyright (c) 2020 Thales.
-# 
+#
 # Copyright and related rights are licensed under the Solderpad
 # License, Version 2.0 (the "License"); you may not use this file except in
 # compliance with the License.  You may obtain a copy of the License at
@@ -93,7 +93,8 @@ if { $::env(PS7_DDR) == 1 } {
    puts "None of the values is matching"
 }
 
-set_property STEPS.SYNTH_DESIGN.ARGS.RETIMING true [get_runs synth_1]
+set_property STEPS.SYNTH_DESIGN.ARGS.RETIMING false [get_runs synth_1]
+set_property STEPS.SYNTH_DESIGN.ARGS.NO_LC true [get_runs synth_1]
 
 launch_runs synth_1
 wait_on_run synth_1

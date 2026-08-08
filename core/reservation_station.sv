@@ -61,7 +61,7 @@ module reservation_station
     output logic                                                         decoded_instr_valid_o //is instruction valid
 );
 
-  localparam NUM_REG = 2 ** ADDR_WIDTH;
+  localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
   // stripped down version of scoreboard_entry_t in order to store only needed data
   typedef struct packed {

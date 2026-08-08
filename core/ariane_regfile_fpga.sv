@@ -47,7 +47,7 @@ module ariane_regfile_fpga #(
     input  logic [CVA6Cfg.NrWbPorts-1:0]                 we_i
 );
 
-  localparam NUM_WORDS = 2 ** ADDR_WIDTH;
+  localparam NUM_WORDS = CVA6Cfg.NrPhysReg;
   localparam LOG_NR_WRITE_PORTS = CVA6Cfg.NrWbPorts == 1 ? 1 : $clog2(CVA6Cfg.NrWbPorts);
 
   // Distributed RAM usually supports one write port per block - duplicate for each write port.

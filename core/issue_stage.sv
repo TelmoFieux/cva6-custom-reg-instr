@@ -161,7 +161,7 @@ module issue_stage
     // new physical register of committed instr - COMMIT_STAGE
     input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_new_phys_i,
     // architectural destination register of committed instr - COMMIT_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_rd_i,
+    input logic [CVA6Cfg.NrCommitPorts-1:0][4:0] commit_rd_i,
     // operation of committed instr - COMMIT_STAGE
     input fu_op [CVA6Cfg.NrCommitPorts-1:0] commit_op_i,
     // Issue stall - PERF_COUNTERS
@@ -186,7 +186,7 @@ module issue_stage
     input logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_i,
 
     // Is rollback active
-    output logic                                              rollback_en_o
+    output logic                                              rollback_active_o
 );
   // ---------------------------------------------------
   // Scoreboard (SB) <-> Issue and Read Operands (IRO)
@@ -227,13 +227,14 @@ module issue_stage
   // ---------------------------------------------------------
 
   logic [CVA6Cfg.NrIssuePorts-1:0] issue_we_i;
+  logic rollback_active;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] gpr_renamed_instr_i, fpr_renamed_instr_i;
   logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id_n, global_rs_id_q;
   logic [CVA6Cfg.NrIssuePorts-1:0] empty_gpr,empty_fpr;
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] renamed_instr_i;
   rat_table_t                                   gpr_commit_rat, fpr_commit_rat;
   logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]              rollback_rd_i;
-  logic [CVA6Cfg.RollbackWidth-1:0][31:0]                                  rollback_arch_rd_i;
+  logic [CVA6Cfg.RollbackWidth-1:0][4:0]                                   rollback_arch_rd_i;
   logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]              rollback_old_phys_i;
   logic [CVA6Cfg.RollbackWidth-1:0]                                        rollback_we_i;
   fu_op [CVA6Cfg.RollbackWidth-1:0]                                        rollback_op_i;
@@ -243,7 +244,10 @@ module issue_stage
   logic [CVA6Cfg.NrIssuePorts-1:0]              issue_fpr_we_i;
 
 
+  logic rollback_en_o;
   assign rollback_en_o = |rollback_we_i;
+  assign rollback_active_o = rollback_active;
+
   if (!CVA6Cfg.FpPresent) begin
     assign empty_fpr = '0;
     assign issue_fpr_we_i = '0;
@@ -742,7 +746,8 @@ module issue_stage
       .store_dispatched_id_i,
       .rollback_arch_rd_o      (rollback_arch_rd_i),
       .wb_op_o,
-      .wb_valid_o              (wb_valid_o)
+      .wb_valid_o              (wb_valid_o),
+      .rollback_active_o       (rollback_active)
   );
 
   // ---------------------------------------------------------

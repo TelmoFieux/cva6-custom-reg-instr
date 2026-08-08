@@ -45,7 +45,7 @@ module commit_stage
     // new register of the committed instr - ISSUE_STAGE
     output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_new_phys_o,
     // architectural destination register of the committed instr - ISSUE_STAGE
-    output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] commit_rd_o,
+    output logic [CVA6Cfg.NrCommitPorts-1:0][4:0] commit_rd_o,
     // op of the committed instr - ISSUE_STAGE
     output fu_op [CVA6Cfg.NrCommitPorts-1:0] commit_op_o,
     // Acknowledge that we are indeed committing - CSR_REGFILE

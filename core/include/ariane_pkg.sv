@@ -55,8 +55,9 @@ package ariane_pkg;
   localparam logic [31:0] OPENHWGROUP_MVENDORID = 32'h0602;
   localparam logic [31:0] ARIANE_MARCHID = 32'd3;
 
-  // 32 registers
-  localparam REG_ADDR_SIZE = 6;
+  // OoO parameters to synchronize with CVA6Cfg parameters
+  localparam NR_PHYS_REG = 40;
+  localparam REG_ADDR_SIZE = $clog2(NR_PHYS_REG);
 
   // Read ports for general purpose register files
   localparam NR_RGPR_PORTS = 2;
@@ -270,7 +271,7 @@ package ariane_pkg;
 
   typedef struct packed {
     logic [31:0][REG_ADDR_SIZE-1:0] rat;
-    logic [(2**REG_ADDR_SIZE)-1:0] free_regs; // available registers
+    logic [NR_PHYS_REG-1:0] free_regs; // available registers
   } rat_table_t;
 
   // ---------------
@@ -534,9 +535,9 @@ package ariane_pkg;
   // Returns the size of each RS
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
-      FLU:  return 4;
+      FLU:  return 2;
       LOAD_STORE: return 4;
-      FPU_ALU2: return 4;
+      FPU_ALU2: return 2;
       F_CVXIF: return 4;
       default: begin
         // pragma translate_off

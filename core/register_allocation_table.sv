@@ -29,11 +29,11 @@ module register_allocation_table
     output logic[CVA6Cfg.NrIssuePorts-1:0]                    empty_o,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    we_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    commit_valid_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_rd_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][4:0]               commit_rd_i,
     input fu_op [CVA6Cfg.NrIssuePorts-1:0]                    commit_op_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_new_phys_i,
-    input logic [CVA6Cfg.RollbackWidth-1:0][31:0]             rollback_rd_i, // architectural register to rollback
+    input logic [CVA6Cfg.RollbackWidth-1:0][4:0]              rollback_rd_i, // architectural register to rollback
     input logic [CVA6Cfg.RollbackWidth-1:0][ADDR_WIDTH-1:0]   rollback_old_phys_i, // physical register to rollback
     input logic [CVA6Cfg.RollbackWidth-1:0]                   rollback_we_i, // rollback is enabled
 
@@ -46,7 +46,7 @@ module register_allocation_table
     input  logic                        rat_restore_en_i
 
 );
-  localparam NUM_REG = 2 ** ADDR_WIDTH;
+  localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
   //keeps track of free physical registers
   logic [CVA6Cfg.NrIssuePorts:0][NUM_REG-1:0] free_regs_masked;

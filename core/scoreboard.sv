@@ -131,11 +131,13 @@ module scoreboard
     // op of the instruction to rollback - ISSUE_STAGE
     output fu_op [CVA6Cfg.RollbackWidth-1:0]                                       rollback_op_o,
     // architectural destination register to rollback - ISSUE_STAGE
-    output logic [CVA6Cfg.RollbackWidth-1:0][31:0]                                 rollback_arch_rd_o,
+    output logic [CVA6Cfg.RollbackWidth-1:0][4:0]                                  rollback_arch_rd_o,
     // op of the instructions wrote back - ISSUE_STAGE
     output fu_op [CVA6Cfg.NrWbPorts-1:0]                                           wb_op_o,
     // is writeback valid - ISSUE_STAGE
-    output logic [CVA6Cfg.NrWbPorts-1:0]                                           wb_valid_o
+    output logic [CVA6Cfg.NrWbPorts-1:0]                                           wb_valid_o,
+    // is rollback enabled ? - CONTROLLER
+    output logic                                                                   rollback_active_o
 );
 
   // this is the FIFO struct of the issue queue
@@ -158,6 +160,7 @@ module scoreboard
 
   logic [CVA6Cfg.NrIssuePorts-1:0] num_issue;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] issue_pointer_n, issue_pointer_q;
+  logic rollback_active_d, rollback_active_q;
   logic [CVA6Cfg.NrIssuePorts:0][CVA6Cfg.TRANS_ID_BITS-1:0] issue_pointer;
 
   logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] commit_pointer_n, commit_pointer_q;
@@ -193,13 +196,14 @@ module scoreboard
   end
 
   assign sb_full_o = issue_full[0];
+  assign rollback_active_o = rollback_active_q;
 
   // output commit instruction directly
   always_comb begin : commit_ports
     for (int unsigned i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin
       commit_instr_o[i] = mem_q[commit_pointer_q[i]].sbe;
       commit_instr_o[i].trans_id = commit_pointer_q[i];
-      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled || (bmiss && (commit_pointer_q[i] == after_flu_wb));
+      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled; //|| (bmiss && (commit_pointer_q[i] == after_flu_wb));
       if ((bmiss || state_q == WALKBACK) && commit_pointer_q[i] == rollback_boundary) begin
         commit_instr_o[i].valid = 1'b0;
       end
@@ -421,7 +425,8 @@ module scoreboard
   always_comb begin : rollback
     state_n        = state_q;
     rollback_pointer_n = rollback_pointer_q;
-    bmiss_trans_id_n    = bmiss_trans_id_q;
+    bmiss_trans_id_n  = bmiss_trans_id_q;
+    rollback_active_d = rollback_active_q;
     rollback_rd_o = '0;
     rollback_we_o = '0;
     rollback_store_buffer_o = '0;
@@ -442,12 +447,13 @@ module scoreboard
           if (bmiss) begin
             bmiss_trans_id_n = after_flu_wb;
           end
-          if (flush_unissued_instr_i && !flush_i) begin
+          if (bmiss && !flush_i) begin
             if (issue_pointer[0] == bmiss_trans_id_n) begin
               state_n = NORMAL;
             end else begin
               state_n = WALKBACK;
               rollback_pointer_n = issue_pointer[0] - 1;
+              rollback_active_d = 1'b1;
             end
           end
         end
@@ -467,6 +473,7 @@ module scoreboard
             if (rollback_index == bmiss_trans_id_q) begin
               state_n = NORMAL;
               rollback_pointer_n = rollback_index;
+              rollback_active_d = 1'b0;
             end
           end
 
@@ -485,10 +492,12 @@ module scoreboard
       mem_q            <= '{default: sb_mem_t'(0)};
       commit_pointer_q <= '0;
       issue_pointer_q  <= '0;
+      rollback_active_q <= '0;
       bmiss_trans_id_q <= '0;
       state_q          <= NORMAL;
     end else begin
       issue_pointer_q <= issue_pointer_n;
+      rollback_active_q <= rollback_active_d;
       mem_q <= mem_n;
       mem_q[x_id_i].sbe.rd <= (x_transaction_accepted_i && ~x_issue_writeback_i) ? 5'b0 : mem_n[x_id_i].sbe.rd;
       commit_pointer_q <= commit_pointer_n;
