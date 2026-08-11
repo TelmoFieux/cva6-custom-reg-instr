@@ -28,6 +28,10 @@ module store_unit
     input logic rst_ni,
     // Flush - CONTROLLER
     input logic flush_i,
+    // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
+    input logic [CVA6Cfg.RollbackWidth-1:0] rollback_i,
+    // trans if of instruction to rollback - SCOREBOARD
+    input logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     input logic stall_st_pending_i,
     // TO_BE_COMPLETED - TO_BE_COMPLETED
@@ -35,7 +39,7 @@ module store_unit
     // Store buffer is empty - TO_BE_COMPLETED
     output logic store_buffer_empty_o,
     // do we need to rollback the store buffer - SCOREBOARD
-    input logic store_buffer_rollback_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0] store_buffer_rollback_i,
     // Has a store been dispatched ? - SCOREBOARD
     output logic store_dispatched_o,
     // Store dispatched trans_id - SCOREBOARD
@@ -152,6 +156,7 @@ module store_unit
   assign trans_id_o      = trans_id_q;  // transaction id from previous cycle
 
   always_comb begin : store_control
+    automatic logic accept_req;
     translation_req_o      = 1'b0;
     valid_o                = 1'b0;
     st_valid               = 1'b0;
@@ -161,10 +166,18 @@ module store_unit
     trans_id_n             = lsu_ctrl_i.trans_id;
     state_d                = state_q;
 
+    accept_req = valid_i;
+
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_i[i] && rollback_trans_id_i[i] == lsu_ctrl_i.trans_id) begin
+        accept_req = 1'b0;
+      end
+    end
+
     case (state_q)
       // we got a valid store
       IDLE: begin
-        if (valid_i) begin
+        if (accept_req) begin
           state_d = VALID_STORE;
           translation_req_o = 1'b1;
           pop_st_o = 1'b1;
@@ -245,6 +258,18 @@ module store_unit
       st_valid = 1'b0;
       state_d  = IDLE;
       valid_o  = 1'b1;
+    end
+
+    // -----------------
+    // Rollback
+    // -----------------
+    for (int unsigned i = 0; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_i[i] && rollback_trans_id_i[i] == lsu_ctrl_i.trans_id && lsu_ctrl_i.valid) begin
+        state_d = IDLE;
+        translation_req_o    = 1'b0;
+        st_valid               = 1'b0;
+        st_valid_without_flush = 1'b0;
+      end
     end
 
     if (flush_i) state_d = IDLE;

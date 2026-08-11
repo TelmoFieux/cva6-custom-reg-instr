@@ -111,6 +111,10 @@ module issue_read_operands
     output logic x_transaction_rejected_o,
     output logic x_issue_writeback_o,
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0] x_id_o,
+    // Register file write enable - COMMIT_STAGE
+    input logic csr_we_i,
+    // csr read data - COMMIT_STAGE
+    input logic [CVA6Cfg.XLEN-1:0] csr_rdata_i,
     // Destination register in the register file - SCOREBOARD
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
     // Value to write to register file - SCOREBOARD
@@ -608,7 +612,7 @@ module issue_read_operands
 
   for (genvar i = 0; i < CVA6Cfg.NrWbPorts; i++) begin : gen_write_back_port
     assign waddr_pack[i] = waddr_i[i];
-    assign wdata_pack[i] = wdata_i[i];
+    assign wdata_pack[i] = csr_we_i && i == FLU_WB ? csr_rdata_i : wdata_i[i];
     assign we_pack[i]    = we_gpr_i[i];
   end
   if (CVA6Cfg.FpgaEn) begin : gen_fpga_regfile

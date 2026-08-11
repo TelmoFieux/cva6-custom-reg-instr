@@ -29,13 +29,13 @@ module register_allocation_table
     output logic[CVA6Cfg.NrIssuePorts-1:0]                    empty_o,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    we_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0]                    commit_valid_i,
-    input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_rd_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][4:0]               commit_rd_i,
     input fu_op [CVA6Cfg.NrIssuePorts-1:0]                    commit_op_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_old_phys_i,
     input logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0]    commit_new_phys_i,
-    input logic [ADDR_WIDTH-1:0]                              rollback_rd_i, // architectural register to rollback
-    input logic [ADDR_WIDTH-1:0]                              rollback_old_phys_i, // physical register to rollback
-    input logic                                               rollback_we_i, // rollback is enabled
+    input logic [CVA6Cfg.RollbackWidth-1:0][4:0]              rollback_rd_i, // architectural register to rollback
+    input logic [CVA6Cfg.RollbackWidth-1:0][ADDR_WIDTH-1:0]   rollback_old_phys_i, // physical register to rollback
+    input logic [CVA6Cfg.RollbackWidth-1:0]                   rollback_we_i, // rollback is enabled
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i, //May be unnecessary to pass the entirety of the struct scoreboard_entry_t
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
@@ -46,7 +46,7 @@ module register_allocation_table
     input  logic                        rat_restore_en_i
 
 );
-  localparam NUM_REG = 2 ** ADDR_WIDTH;
+  localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
   //keeps track of free physical registers
   logic [CVA6Cfg.NrIssuePorts:0][NUM_REG-1:0] free_regs_masked;
@@ -147,9 +147,11 @@ module register_allocation_table
     end
 
     //rollback
-    if (rollback_we_i && (FPR_RAT || rollback_rd_i != '0)) begin
-      rat_n.free_regs[rat_n.rat[rollback_rd_i]] = 1'b1;
-      rat_n.rat[rollback_rd_i] = rollback_old_phys_i;
+    for (int unsigned i = 0; i< CVA6Cfg.RollbackWidth ; i++ ) begin
+      if (rollback_we_i[i] && (FPR_RAT || rollback_rd_i[i] != '0)) begin
+        rat_n.free_regs[rat_n.rat[rollback_rd_i[i]]] = 1'b1;
+        rat_n.rat[rollback_rd_i[i]] = rollback_old_phys_i[i];
+      end
     end
 
     if (rat_restore_en_i) begin
@@ -166,8 +168,8 @@ module register_allocation_table
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      // rat_q.free_regs <= NUM_REG'('1) << 32;
-      rat_q.free_regs <= '1;
+      rat_q.free_regs <= NUM_REG'('1) << 32;
+      //rat_q.free_regs <= '1;
       for (int i = 0; i < 32; i++) begin
         rat_q.rat[i] <= ADDR_WIDTH'(i);
       end

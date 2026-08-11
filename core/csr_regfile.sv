@@ -195,6 +195,12 @@ module csr_regfile
     logic [CVA6Cfg.PPNW-1:0]  ppn;
   } hgatp_t;
 
+  // single register to avoid combinatorial loop in OoO
+  logic single_step_dbg_pending_q, single_step_dbg_pending_d;
+  logic ebreak_dbg_pending_q, ebreak_dbg_pending_d;
+  logic extern_dbg_pending_q, extern_dbg_pending_d;
+  logic dbg_ebreak_dbg_pending_q, dbg_ebreak_dbg_pending_d;
+
   // internal signal to keep track of access exceptions
   logic read_access_exception, update_access_exception, privilege_violation;
   logic virtual_read_access_exception, virtual_update_access_exception, virtual_privilege_violation;
@@ -915,7 +921,10 @@ module csr_regfile
     update_access_exception         = 1'b0;
     virtual_update_access_exception = 1'b0;
 
-    set_debug_pc_o                  = 1'b0;
+    single_step_dbg_pending_d       = 1'b0;
+    ebreak_dbg_pending_d            = 1'b0;
+    dbg_ebreak_dbg_pending_d        = 1'b0;
+    extern_dbg_pending_d            = 1'b0;
 
     perf_we_o                       = 1'b0;
     perf_data_o                     = 'b0;
@@ -1973,18 +1982,18 @@ module csr_regfile
         unique case (priv_lvl_o)
           riscv::PRIV_LVL_M: begin
             debug_mode_d   = dcsr_q.ebreakm;
-            set_debug_pc_o = dcsr_q.ebreakm;
+            ebreak_dbg_pending_d = dcsr_q.ebreakm;
           end
           riscv::PRIV_LVL_S: begin
             if (CVA6Cfg.RVS) begin
               debug_mode_d   = (CVA6Cfg.RVH && v_q) ? dcsr_q.ebreakvs : dcsr_q.ebreaks;
-              set_debug_pc_o = (CVA6Cfg.RVH && v_q) ? dcsr_q.ebreakvs : dcsr_q.ebreaks;
+              ebreak_dbg_pending_d = (CVA6Cfg.RVH && v_q) ? dcsr_q.ebreakvs : dcsr_q.ebreaks;
             end
           end
           riscv::PRIV_LVL_U: begin
             if (CVA6Cfg.RVU) begin
               debug_mode_d   = (CVA6Cfg.RVH && v_q) ? dcsr_q.ebreakvu : dcsr_q.ebreaku;
-              set_debug_pc_o = (CVA6Cfg.RVH && v_q) ? dcsr_q.ebreakvu : dcsr_q.ebreaku;
+              ebreak_dbg_pending_d = (CVA6Cfg.RVH && v_q) ? dcsr_q.ebreakvu : dcsr_q.ebreaku;
             end
           end
           default: ;
@@ -2003,7 +2012,7 @@ module csr_regfile
         // enter debug mode
         debug_mode_d = 1'b1;
         // jump to the base address
-        set_debug_pc_o = 1'b1;
+        extern_dbg_pending_d = 1'b1;
         // save the cause as external debug request
         dcsr_d.cause = ariane_pkg::CauseRequest;
       end
@@ -2033,13 +2042,13 @@ module csr_regfile
           };
         end
         debug_mode_d   = 1'b1;
-        set_debug_pc_o = 1'b1;
+        single_step_dbg_pending_d = 1'b1;
         dcsr_d.cause   = ariane_pkg::CauseSingleStep;
       end
     end
     // go in halt-state again when we encounter an exception
     if (CVA6Cfg.DebugEn && debug_mode_q && ex_i.valid && ex_i.cause == riscv::BREAKPOINT) begin
-      set_debug_pc_o = 1'b1;
+      dbg_ebreak_dbg_pending_d = 1'b1;
     end
 
     // ------------------------------
@@ -2533,6 +2542,8 @@ module csr_regfile
   assign single_step_o = CVA6Cfg.DebugEn ? dcsr_q.step : 1'b0;
   assign mcountinhibit_o = {{29 - MHPMCounterNum{1'b0}}, mcountinhibit_q};
 
+  assign set_debug_pc_o = dbg_ebreak_dbg_pending_q | extern_dbg_pending_q | single_step_dbg_pending_q | ebreak_dbg_pending_q;
+
   // sequential process
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (~rst_ni) begin
@@ -2544,6 +2555,10 @@ module csr_regfile
       end
       // debug signals
       if (CVA6Cfg.DebugEn) begin
+        single_step_dbg_pending_q <= 1'b0;
+        ebreak_dbg_pending_q <= 1'b0;
+        dbg_ebreak_dbg_pending_q <= 1'b0;
+        extern_dbg_pending_q <= 1'b0;
         debug_mode_q <= 1'b0;
         dcsr_q       <= '{xdebugver: 4'h4, prv: riscv::PRIV_LVL_M, default: '0};
         dpc_q        <= '0;
@@ -2628,6 +2643,10 @@ module csr_regfile
       end
       // debug signals
       if (CVA6Cfg.DebugEn) begin
+        single_step_dbg_pending_q <= single_step_dbg_pending_d;
+        ebreak_dbg_pending_q <= ebreak_dbg_pending_d;
+        dbg_ebreak_dbg_pending_q <= dbg_ebreak_dbg_pending_d;
+        extern_dbg_pending_q <= extern_dbg_pending_d;
         debug_mode_q <= debug_mode_d;
         dcsr_q       <= dcsr_d;
         dpc_q        <= dpc_d;

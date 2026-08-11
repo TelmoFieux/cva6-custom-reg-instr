@@ -89,6 +89,7 @@ CFLAGS  ?=	-march=rv32im_zicsr \
 		-DPREALLOCATE=1 \
 		-fvisibility=hidden \
 		-DSTDIO_THRU_UART \
+		-O3 \
 		-mcmodel=medany \
 		-fno-tree-loop-distribute-patterns\
 		-funroll-all-loops \
@@ -108,6 +109,7 @@ RISCV_CFLAGS :=-DPERFORMANCE_RUN=1 \
 		-DPREALLOCATE=1 \
 		-fvisibility=hidden \
 		-DSTDIO_THRU_UART \
+		-O3 \
 		-mcmodel=medany \
 		-fno-tree-loop-distribute-patterns\
 		-funroll-all-loops \

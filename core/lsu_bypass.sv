@@ -36,9 +36,9 @@ module lsu_bypass
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     input logic flush_i,
     // do we need to rollback the lsu bypass buffer ? - SCOREBOARD
-    input logic rollback_en_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0] rollback_en_i,
     // rollback trans id - SCOREBOARD
-    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
+    input logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
 
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     input lsu_ctrl_t lsu_req_i,
@@ -68,6 +68,7 @@ module lsu_bypass
     automatic logic [1:0] status_cnt;
     automatic logic write_pointer;
     automatic logic read_pointer;
+    automatic logic prev_write_ptr;
 
     status_cnt = status_cnt_q;
     write_pointer = write_pointer_q;
@@ -104,13 +105,19 @@ module lsu_bypass
       mem_n = '0;
     end
 
-    if (rollback_en_i && !pop_ld_i && !pop_st_i) begin
-      automatic logic prev_write_ptr;
-      prev_write_ptr = write_pointer_q - 1'b1;
-      if (mem_q[prev_write_ptr].valid && mem_q[prev_write_ptr].trans_id == rollback_trans_id_i) begin
-        write_pointer = prev_write_ptr;
-        mem_n[prev_write_ptr].valid = 1'b0;
-        status_cnt--;
+    prev_write_ptr = write_pointer;
+
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_en_i[i] && !pop_ld_i && !pop_st_i) begin
+        prev_write_ptr = prev_write_ptr - 1'b1;
+
+        if (mem_n[prev_write_ptr].valid && mem_n[prev_write_ptr].trans_id == rollback_trans_id_i[i]) begin
+          write_pointer = prev_write_ptr;
+          mem_n[prev_write_ptr].valid = 1'b0;
+          status_cnt--;
+        end else begin
+          prev_write_ptr = prev_write_ptr + 1'b1;
+        end
       end
     end
 

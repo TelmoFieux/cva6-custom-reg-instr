@@ -55,8 +55,9 @@ package ariane_pkg;
   localparam logic [31:0] OPENHWGROUP_MVENDORID = 32'h0602;
   localparam logic [31:0] ARIANE_MARCHID = 32'd3;
 
-  // 32 registers
-  localparam REG_ADDR_SIZE = 6;
+  // OoO parameters to synchronize with CVA6Cfg parameters
+  localparam NR_PHYS_REG = 40;
+  localparam REG_ADDR_SIZE = $clog2(NR_PHYS_REG);
 
   // Read ports for general purpose register files
   localparam NR_RGPR_PORTS = 2;
@@ -270,7 +271,7 @@ package ariane_pkg;
 
   typedef struct packed {
     logic [31:0][REG_ADDR_SIZE-1:0] rat;
-    logic [(2**REG_ADDR_SIZE)-1:0] free_regs; // available registers
+    logic [NR_PHYS_REG-1:0] free_regs; // available registers
   } rat_table_t;
 
   // ---------------
@@ -511,7 +512,18 @@ package ariane_pkg;
     FCMOV
   } fu_op;
 
-  // list of all RS instantiated
+  function automatic logic op_is_branch(input fu_op op);
+    unique case (op) inside
+      EQ, NE, LTS, GES, LTU, GEU: return 1'b1;
+      default:                    return 1'b0;  // all other ops
+    endcase
+  endfunction
+
+  // -------------------------------
+  // OoO struct and functions
+  // -------------------------------
+
+  // list of all RS possible
   typedef enum logic [3:0] {
     FLU,
     LOAD_STORE,
@@ -520,26 +532,82 @@ package ariane_pkg;
     F_CVXIF
   } fu_phys;
 
-  function automatic logic op_is_branch(input fu_op op);
-    unique case (op) inside
-      EQ, NE, LTS, GES, LTU, GEU: return 1'b1;
-      default:                    return 1'b0;  // all other ops
-    endcase
-  endfunction
-
   // Returns the size of each RS
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
-      FLU:  return 4;
+      FLU:  return 2;
       LOAD_STORE: return 4;
-      FPU_ALU2: return 4;
+      FPU_ALU2: return 2;
       F_CVXIF: return 4;
       default: begin
         // pragma translate_off
-        $fatal(1, "Invalid RS supplied");
+        $fatal(1, "Invalid RS size supplied");
         // pragma translate_on
         return 0;
       end
+    endcase
+  endfunction
+
+
+  // Returns the number of cycles an instruction takes to produce its result,
+  // or 0 if the latency is not statically determinable (memory ops whose
+  // latency depends on cache hit/miss, iterative units like the divider/fsqrt
+  // whose latency depends on operand width or value, CSR ops whose result is
+  // only valid at commit time, and accelerator/CVXIF offloads whose latency
+  // is entirely opaque to the core).
+  //
+  // NOTE: MULT_LATENCY and FPU_LATENCY are placeholders matching common CVA6
+  // configurations. Adjust them to match the actual pipeline depth of your
+  // multiplier / FPU if it differs.
+  function automatic logic [3:0] instr_cycle_count(fu_op op);
+    localparam logic [3:0] MULT_LATENCY = 4'd2;
+    localparam logic [3:0] FPU_LATENCY  = 4'd0;
+
+    instr_cycle_count = 4'd0;
+
+    case (op) inside
+      // ALU / branch / CSR-flow / fence: 1 cycle
+      [ADD:NE], [JALR:SLTU], [MRET:HFENCE_GVMA]:
+        instr_cycle_count = 4'd1;
+
+      // CSR read/write: result only valid at commit -> indeterminate
+      [CSR_WRITE:CSR_CLEAR]: instr_cycle_count = 4'd0;
+
+      // Integer loads/stores + hypervisor ld/st: indeterminate
+      [LD:HSV_D]: instr_cycle_count = 4'd0;
+
+      // AMOs: memory + only truly complete at commit -> indeterminate
+      [AMO_LRW:AMO_MINDU]: instr_cycle_count = 4'd0;
+
+      // Multiplier: fixed pipelined latency
+      [MUL:MULW]: instr_cycle_count = MULT_LATENCY;
+
+      // Divider/remainder: iterative -> indeterminate
+      [DIV:REMUW]: instr_cycle_count = 4'd0;
+
+      // FP loads/stores: indeterminate
+      [FLD:FSB]: instr_cycle_count = 4'd0;
+
+      // FP fixed-latency ops
+      [FADD:FMUL], FMIN_MAX, [FMADD:FCLASS], [VFMIN:VFCPKCD_D], FCMOV:
+        instr_cycle_count = FPU_LATENCY;
+
+      // FP divide/sqrt: iterative, non-pipelined -> indeterminate
+      FDIV, FSQRT: instr_cycle_count = 4'd0;
+
+      // CVXIF offload: opaque latency
+      OFFLOAD: instr_cycle_count = 4'd0;
+
+      // Bitmanip: 1 cycle
+      [ORCB:XNOR]: instr_cycle_count = 4'd1;
+
+      // Accelerator ops: opaque latency
+      [ACCEL_OP:ACCEL_OP_STORE]: instr_cycle_count = 4'd0;
+
+      // Zicond / pack / brev8 / zip / cmov (integer move): 1 cycle
+      [CZERO_EQZ:CMOV]: instr_cycle_count = 4'd1;
+
+      default: instr_cycle_count = 4'd0;
     endcase
   endfunction
 

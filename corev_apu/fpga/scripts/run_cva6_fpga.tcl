@@ -1,5 +1,5 @@
 # Copyright (c) 2020 Thales.
-# 
+#
 # Copyright and related rights are licensed under the Solderpad
 # License, Version 2.0 (the "License"); you may not use this file except in
 # compliance with the License.  You may obtain a copy of the License at
@@ -94,6 +94,7 @@ if { $::env(PS7_DDR) == 1 } {
 }
 
 set_property STEPS.SYNTH_DESIGN.ARGS.RETIMING true [get_runs synth_1]
+# set_property STEPS.SYNTH_DESIGN.ARGS.NO_LC true [get_runs synth_1]
 
 launch_runs synth_1
 wait_on_run synth_1
@@ -111,8 +112,20 @@ report_cdc                                                              -file re
 report_clock_interaction                                                -file reports_cva6_fpga_synth/$project.clock_interaction.rpt
 
 # set for RuntimeOptimized implementation
-set_property "steps.place_design.args.directive" "RuntimeOptimized" [get_runs impl_1]
-set_property "steps.route_design.args.directive" "RuntimeOptimized" [get_runs impl_1]
+# set_property "steps.place_design.args.directive" "RuntimeOptimized" [get_runs impl_1]
+# set_property "steps.route_design.args.directive" "RuntimeOptimized" [get_runs impl_1]
+# set_property "steps.place_design.args.directive" "AltSpreadLogic_high" [get_runs impl_1]
+# set_property "steps.route_design.args.directive" "AggressiveExplore" [get_runs impl_1]
+
+# set_property "steps.place_design.args.directive" "Explore" [get_runs impl_1]
+set_property "steps.place_design.args.directive" "ExtraTimingOpt" [get_runs impl_1]
+set_property "steps.route_design.args.directive" "Explore" [get_runs impl_1]
+
+set_property "steps.phys_opt_design.is_enabled" "1" [get_runs impl_1]
+# set_property "steps.phys_opt_design.args.directive" "Explore" [get_runs impl_1]
+# set_property "steps.phys_opt_design.args.directive" "AggressiveFanoutOpt" [get_runs impl_1]
+# set_property "steps.phys_opt_design.args.directive" "Explore" [get_runs impl_1]
+set_property "steps.phys_opt_design.args.directive" "AlternateFlowWithRetiming" [get_runs impl_1]
 
 ##create_clock -period $::env(CLK_PERIOD_NS) -name clk_i   [get_ports clk_i]
 
