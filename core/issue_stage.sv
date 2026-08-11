@@ -584,7 +584,7 @@ module issue_stage
         .decoded_instr_valid_o      (decoded_instr_valid_o)
       );
       assign rs_results[i] = decoded_instr_trans_id_o;
-      assign rs_valid[i] = decoded_instr_valid_o && fu_ready;
+      assign rs_valid[i] = decoded_instr_valid_o; //&& fu_ready;
       assign rs_full[i] = rs_full_o & we_i;
       assign rs_global_id[i] = decoded_instr_global_id_o;
     end else begin

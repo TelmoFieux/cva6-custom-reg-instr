@@ -114,7 +114,7 @@ module reservation_station
 
   assign full_o = empty_mask;
 
-  logic [NR_RS_ENTRIES-1:0] tournament_valid, tournament_oldest_valid;
+  logic [NR_RS_ENTRIES-1:0] tournament_valid;
   logic [NR_RS_ENTRIES-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num;
   logic [NR_RS_ENTRIES-1:0][$clog2(NR_RS_ENTRIES)-1:0] tournament_id;
 
@@ -132,7 +132,6 @@ module reservation_station
       assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ?
         (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR ? 1'b1 : 1'b0)
       : 1'b0;
-      assign tournament_oldest_valid[i] = (rs_q.free_entries[i] == 1'b0);
     end
     assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
     assign tournament_id[i] = i;

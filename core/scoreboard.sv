@@ -204,7 +204,7 @@ module scoreboard
       commit_instr_o[i] = mem_q[commit_pointer_q[i]].sbe;
       commit_instr_o[i].trans_id = commit_pointer_q[i];
       commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled; //|| (bmiss && (commit_pointer_q[i] == after_flu_wb));
-      if ((bmiss || state_q == WALKBACK) && commit_pointer_q[i] == rollback_boundary) begin
+      if (state_q == WALKBACK && commit_pointer_q[i] == bmiss_trans_id_q) begin
         commit_instr_o[i].valid = 1'b0;
       end
     end

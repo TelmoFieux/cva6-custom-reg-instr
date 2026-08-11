@@ -27,9 +27,9 @@ module serdiv
     // Asynchronous reset active low - SUBSYSTEM
     input logic rst_ni,
     // Rollback - SCOREBOARD
-    input  logic rollback_i,
+    input  logic [CVA6Cfg.RollbackWidth-1:0] rollback_i,
     // Rollback trans ID - SCOREBOARD
-    input  logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
+    input  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_i,
     // Serdiv translation ID - Mult
     input logic [CVA6Cfg.TRANS_ID_BITS-1:0] id_i,
     // A operand - Mult
@@ -169,6 +169,8 @@ module serdiv
   assign cnt_d = (load_en) ? div_shift[$clog2(WIDTH)-1:0] : (~cnt_zero) ? cnt_q - 1 : cnt_q;
 
   always_comb begin : p_fsm
+    automatic logic accept_req;
+
     // default
     state_d    = state_q;
     in_rdy_o   = 1'b0;
@@ -178,11 +180,19 @@ module serdiv
     b_reg_en   = 1'b0;
     res_reg_en = 1'b0;
 
+    accept_req = in_vld_i;
+
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_i[i] && rollback_trans_id_i[i] == id_i) begin
+        accept_req = 1'b0;
+      end
+    end
+
     unique case (state_q)
       IDLE: begin
         in_rdy_o = 1'b1;
 
-        if (in_vld_i) begin
+        if (accept_req) begin
           // CVA6: there is a cycle delay until the valid signal is asserted by the id stage
           // Ara:  we need a stable handshake
           in_rdy_o = (STABLE_HANDSHAKE) ? 1'b1 : 1'b0;
@@ -221,20 +231,22 @@ module serdiv
       default: state_d = IDLE;
     endcase
 
+    for (int unsigned i = 0; i<CVA6Cfg.RollbackWidth; i++) begin
+      if (rollback_i[i] && state_q != IDLE && id_q == rollback_trans_id_i[i]) begin
+        a_reg_en  = 1'b0;
+        b_reg_en  = 1'b0;
+        load_en   = 1'b0;
+        state_d   = IDLE;
+        // out_vld_o = 1'b0;
+      end
+    end
+
     if (flush_i) begin
       a_reg_en = 1'b0;
       b_reg_en = 1'b0;
       load_en  = 1'b0;
       state_d  = IDLE;
-      out_vld_o = 1'b0;
-    end
-
-    if (rollback_i && state_q != IDLE && id_q == rollback_trans_id_i) begin
-      a_reg_en  = 1'b0;
-      b_reg_en  = 1'b0;
-      load_en   = 1'b0;
-      state_d   = IDLE;
-      out_vld_o = 1'b0;
+      //out_vld_o = 1'b0;
     end
   end
 
