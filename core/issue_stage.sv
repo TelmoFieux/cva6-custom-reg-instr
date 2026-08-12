@@ -206,7 +206,6 @@ module issue_stage
 
 
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_sb_iro;
-  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       dispatch_instr_o;
   logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_sb_iro;
   logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_valid_sb_iro;
   logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_ack_iro_sb;
@@ -296,6 +295,7 @@ module issue_stage
         .rollback_old_phys_i     (rollback_old_phys_i),
         .rollback_we_i           (gpr_rollback_we_i),
         .decoded_instr_i         (decoded_instr_i),
+        .decoded_instr_valid_i   (decoded_instr_valid_i),
         .decoded_instr_ack_i     (decoded_instr_ack_o),
         .renamed_instr_o         (gpr_renamed_instr_i),
         .rat_state_o             (),
@@ -325,6 +325,7 @@ module issue_stage
         .rollback_old_phys_i     (rollback_old_phys_i),
         .rollback_we_i           (1'b0),
         .decoded_instr_i         (decoded_instr_i),
+        .decoded_instr_valid_i   (decoded_instr_valid_i),
         .decoded_instr_ack_i     (decoded_instr_ack_o),
         .renamed_instr_o         (),
         .rat_state_o             (gpr_commit_rat),
@@ -371,6 +372,7 @@ module issue_stage
           .rollback_old_phys_i     (rollback_old_phys_i),
           .rollback_we_i           (fpr_rollback_we_i),
           .decoded_instr_i         (decoded_instr_i),
+          .decoded_instr_valid_i   (decoded_instr_valid_i),
           .decoded_instr_ack_i     (decoded_instr_ack_o),
           .renamed_instr_o         (fpr_renamed_instr_i),
           .rat_state_o             (),
@@ -401,6 +403,7 @@ module issue_stage
           .rollback_old_phys_i     (rollback_old_phys_i),
           .rollback_we_i           (1'b0),
           .decoded_instr_i         (decoded_instr_i),
+          .decoded_instr_valid_i   (decoded_instr_valid_i),
           .decoded_instr_ack_i     (decoded_instr_ack_o),
           .renamed_instr_o         (),
           .rat_state_o             (fpr_commit_rat),
@@ -445,12 +448,12 @@ module issue_stage
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
 
-  logic [NR_WB-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rs_results;
+  scoreboard_entry_t [NR_WB-1:0] rs_results;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rs_global_id;
   logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_full;
   logic [NR_WB-1:0] rs_valid;
 
-  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] tree_results;
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] tree_results;
   logic [CVA6Cfg.NrIssuePorts-1:0] tree_valid;
 
 
@@ -464,10 +467,8 @@ module issue_stage
 
     if (is_rs_instanciated) begin : rs_instance
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
-      logic fu_ready;
 
-      logic [CVA6Cfg.TRANS_ID_BITS-1:0]decoded_instr_trans_id_o;
-      logic [CVA6Cfg.GlobalRsIdWidth-1:0]decoded_instr_global_id_o;
+      scoreboard_entry_t decoded_instr_o;
       logic                            decoded_instr_valid_o;
       logic [CVA6Cfg.NrIssuePorts-1:0] rs_full_o;
 
@@ -530,25 +531,6 @@ module issue_stage
           assign rm_rd_i[j] = issue_instr_sb_iro[j].rd;
       end
 
-      case (fu)
-        FLU :
-          assign fu_ready = flu_ready_i;
-
-        FPU_ALU2 :
-          assign fu_ready = en_fpr ? fpu_ready_i : 1'b1;
-
-        LOAD_STORE :
-          assign fu_ready = lsu_ready_i;
-
-        F_CVXIF :
-          assign fu_ready = xfu_ready_i;
-
-        default :
-          assign fu_ready = 1'b0;
-      endcase
-
-
-
       reservation_station #(
         .CVA6Cfg            (CVA6Cfg),
         .DATA_WIDTH         (CVA6Cfg.XLEN),
@@ -577,16 +559,16 @@ module issue_stage
         .rollback_rd_i              (rollback_rd_i),
         .rs_restore_en_i            (flush_i),
         .decoded_instr_i            (renamed_instr_i),
+        .decoded_instr_valid_i      (decoded_instr_valid_i),
         .decoded_instr_ack_i        (decoded_instr_ack_o),
         .commit_pointer_i           (rvfi_commit_pointer_o),
-        .decoded_instr_trans_id_o   (decoded_instr_trans_id_o),
-        .decoded_instr_global_id_o  (decoded_instr_global_id_o),
+        .decoded_instr_o            (decoded_instr_o),
         .decoded_instr_valid_o      (decoded_instr_valid_o)
       );
-      assign rs_results[i] = decoded_instr_trans_id_o;
-      assign rs_valid[i] = decoded_instr_valid_o; //&& fu_ready;
+      assign rs_results[i] = decoded_instr_o;
+      assign rs_valid[i] = decoded_instr_valid_o;
       assign rs_full[i] = rs_full_o & we_i;
-      assign rs_global_id[i] = decoded_instr_global_id_o;
+      assign rs_global_id[i] = decoded_instr_o.global_rs_id;
     end else begin
       assign rs_results[i] = '0;
       assign rs_valid[i] = '0;
@@ -634,7 +616,7 @@ module issue_stage
     );
 
     assign tree_results[i] = rs_results[winner_o];
-    assign tree_valid[i] = winner_valid_o;
+    assign tree_valid[i] = winner_valid_o & (!rollback_active_o);
 
     assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_WB'(1) << winner_o);
 
@@ -646,19 +628,19 @@ module issue_stage
   // and it must be issued strictly in order
 
   always_comb begin : issue_valid
-    if (dispatch_instr_o[0].fu == CSR || dispatch_instr_o[1].fu == CSR) begin
-      issue_instr_sb_iro[0] = dispatch_instr_o[0];
+    if (tree_results[0].fu == CSR || tree_results[1].fu == CSR) begin
+      issue_instr_sb_iro[0] = tree_results[0];
       issue_instr_sb_iro[1] = '0;
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = 1'b0;
-    end else if (dispatch_instr_o[1].fu == CVXIF) begin
-      issue_instr_sb_iro[0] = dispatch_instr_o[1];
-      issue_instr_sb_iro[1] = dispatch_instr_o[0];
+    end else if (tree_results[1].fu == CVXIF) begin
+      issue_instr_sb_iro[0] = tree_results[1];
+      issue_instr_sb_iro[1] = tree_results[0];
       issue_instr_valid_sb_iro[0] = tree_valid[1];
       issue_instr_valid_sb_iro[1] = tree_valid[0];
     end else begin
-      issue_instr_sb_iro[0] = dispatch_instr_o[0];
-      issue_instr_sb_iro[1] = dispatch_instr_o[1];
+      issue_instr_sb_iro[0] = tree_results[0];
+      issue_instr_sb_iro[1] = tree_results[1];
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = tree_valid[1];
     end
@@ -667,12 +649,12 @@ module issue_stage
   always_comb begin : instr_ack_update
     //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
     decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ?
-        (empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0]) ? 1'b0 :
-      (issue_instr_ack[0] && !final_rs_full[0]) : 1'b0;
+        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0]) ? 1'b0 :
+      (issue_instr_ack[0] && !final_rs_full[0])) : 1'b0;
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
       decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ?
-          (empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i]) ? 1'b0 :
-        (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1]) : 1'b0;
+          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i]) ? 1'b0 :
+        (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1])) : 1'b0;
     end
   end
 
@@ -712,8 +694,6 @@ module issue_stage
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
       .decoded_instr_ack_i     (decoded_instr_ack_o),
-      .dispatch_instr_trans_id_i(tree_results),
-      .dispatch_instr_o,
       .orig_instr_o            (orig_instr_sb_iro),
       .issue_instr_valid_o     (issue_instr_ack),
       .issue_ack_i             (),

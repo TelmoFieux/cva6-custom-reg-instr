@@ -38,6 +38,7 @@ module register_allocation_table
     input logic [CVA6Cfg.RollbackWidth-1:0]                   rollback_we_i, // rollback is enabled
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_i, //May be unnecessary to pass the entirety of the struct scoreboard_entry_t
+    input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_i,
     input  logic              [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
     output scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] renamed_instr_o,
 
@@ -53,7 +54,6 @@ module register_allocation_table
   logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0] alloc_idx;
   logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
 
-
   assign free_regs_masked[0] = rat_q.free_regs;
 
   //priority encoder cascade to get index for each instr
@@ -68,12 +68,13 @@ module register_allocation_table
             .empty_o(empty_mask[i])
         );
 
-        assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) ?
+        assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_valid_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) ?
           (free_regs_masked[i] & ~(NUM_REG'(1) << alloc_idx[i])) :
           free_regs_masked[i];
     end
 
     assign empty_o = empty_mask;
+
   end else begin
     assign empty_o = '0;
     assign free_regs_masked[CVA6Cfg.NrIssuePorts] = rat_q.free_regs;
@@ -86,6 +87,14 @@ module register_allocation_table
 
   always_comb begin : renaming
     rat_n = rat_q;
+
+    if (!COMMIT_RAT) begin
+      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
+          rat_n.free_regs = free_regs_masked[i+1];
+        end
+      end
+    end
 
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       renamed_instr_o[i] = decoded_instr_i[i];
@@ -124,7 +133,7 @@ module register_allocation_table
 
     //updating free list after commit
     if (!rat_restore_en_i) begin
-      rat_n.free_regs = free_regs_masked[CVA6Cfg.NrIssuePorts];
+
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
         if (commit_valid_i[i] && ((is_rd_fpr(commit_op_i[i]) && FPR_RAT==1'b1) || (!is_rd_fpr(commit_op_i[i]) && FPR_RAT==1'b0))) begin
           if (FPR_RAT || commit_rd_i[i] != '0) begin
@@ -136,8 +145,6 @@ module register_allocation_table
             end
           end
         end
-
-
       end
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
         if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin

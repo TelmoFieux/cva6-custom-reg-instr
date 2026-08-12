@@ -98,17 +98,10 @@ module lsu_bypass
 
     if (pop_st_i && pop_ld_i) mem_n = '0;
 
-    if (flush_i) begin
-      status_cnt = '0;
-      write_pointer = '0;
-      read_pointer = '0;
-      mem_n = '0;
-    end
-
     prev_write_ptr = write_pointer;
 
     for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
-      if (rollback_en_i[i] && !pop_ld_i && !pop_st_i) begin
+      if (rollback_en_i[i] && !pop_ld_i && !pop_st_i && !flush_i) begin
         prev_write_ptr = prev_write_ptr - 1'b1;
 
         if (mem_n[prev_write_ptr].valid && mem_n[prev_write_ptr].trans_id == rollback_trans_id_i[i]) begin
@@ -119,6 +112,13 @@ module lsu_bypass
           prev_write_ptr = prev_write_ptr + 1'b1;
         end
       end
+    end
+
+    if (flush_i) begin
+      status_cnt = '0;
+      write_pointer = '0;
+      read_pointer = '0;
+      mem_n = '0;
     end
 
     // default assignments

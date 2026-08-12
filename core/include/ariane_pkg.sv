@@ -56,7 +56,7 @@ package ariane_pkg;
   localparam logic [31:0] ARIANE_MARCHID = 32'd3;
 
   // OoO parameters to synchronize with CVA6Cfg parameters
-  localparam NR_PHYS_REG = 40;
+  localparam NR_PHYS_REG = 44;
   localparam REG_ADDR_SIZE = $clog2(NR_PHYS_REG);
 
   // Read ports for general purpose register files
@@ -535,9 +535,9 @@ package ariane_pkg;
   // Returns the size of each RS
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
-      FLU:  return 2;
+      FLU:  return 4;
       LOAD_STORE: return 4;
-      FPU_ALU2: return 2;
+      FPU_ALU2: return 4;
       F_CVXIF: return 4;
       default: begin
         // pragma translate_off

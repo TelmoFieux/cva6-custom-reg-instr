@@ -53,32 +53,18 @@ module reservation_station
     input  logic                                                         rs_restore_en_i, // id of the entry to remove
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]                 decoded_instr_i,
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_valid_i,
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_ack_i,
     input  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]  commit_pointer_i,
 
-    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                             decoded_instr_trans_id_o, //instructions found ready
-    output logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           decoded_instr_global_id_o, //instructions found ready
+    output scoreboard_entry_t                                            decoded_instr_o, //instructions found ready
     output logic                                                         decoded_instr_valid_o //is instruction valid
 );
 
   localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
-  // stripped down version of scoreboard_entry_t in order to store only needed data
   typedef struct packed {
-      logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id;
-      logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;
-      fu_t fu;
-      fu_op op;
-      logic [CVA6Cfg.RegAddrWidth-1:0] rs1;
-      logic [CVA6Cfg.RegAddrWidth-1:0] rs2;
-      logic [CVA6Cfg.RegAddrWidth-1:0] rd;
-      logic [CVA6Cfg.XLEN-1:0] result;
-      logic use_imm;
-      logic ex_valid; // an exception has occurred during frontend
-  } rs_entry_t;
-
-  typedef struct packed {
-    rs_entry_t [NR_RS_ENTRIES-1:0] rs_table;
+    scoreboard_entry_t [NR_RS_ENTRIES-1:0] rs_table;
     logic [NR_RS_ENTRIES-1:0] free_entries;
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
   } reservation_station_t;
@@ -94,6 +80,7 @@ module reservation_station
   logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
   logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(NR_RS_ENTRIES):0] alloc_idx;
 
+
   assign free_entries_masked[0] = rs_q.free_entries;
 
   //priority encoder cascade to get free index in RS
@@ -107,7 +94,7 @@ module reservation_station
           .empty_o(empty_mask[i])
       );
 
-      assign free_entries_masked[i+1] = (we_i[i] && decoded_instr_ack_i[i] && empty_mask[i] == 1'b0) ?
+      assign free_entries_masked[i+1] = (we_i[i] && decoded_instr_valid_i[i] && empty_mask[i] == 1'b0) ?
         (free_entries_masked[i] & ~(NR_RS_ENTRIES'(1) << alloc_idx[i])) :
         free_entries_masked[i];
   end
@@ -137,7 +124,7 @@ module reservation_station
     assign tournament_id[i] = i;
   end
 
-  logic [$clog2(NR_RS_ENTRIES)-1:0] winner_o, winner_oldest_o;
+  logic [$clog2(NR_RS_ENTRIES)-1:0] winner_o;
   logic winner_valid_o;
 
   tournament_tree #(
@@ -165,8 +152,7 @@ module reservation_station
     assign decoded_instr_valid_o = winner_valid_o;
   end
 
-  assign decoded_instr_trans_id_o = rs_q.rs_table[winner_o].trans_id;
-  assign decoded_instr_global_id_o = rs_q.rs_table[winner_o].global_rs_id;
+  assign decoded_instr_o = rs_q.rs_table[winner_o];
 
   always_comb begin : updating_rs
     logic allocated_by_p0;
@@ -211,19 +197,7 @@ module reservation_station
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (decoded_instr_ack_i[i]) begin
         if (we_i[i] && empty_mask[i] == 1'b0) begin
-          rs_n.rs_table[alloc_idx[i]] =
-            {
-            decoded_instr_i[i].global_rs_id,
-            decoded_instr_i[i].trans_id,
-            decoded_instr_i[i].fu,
-            decoded_instr_i[i].op,
-            decoded_instr_i[i].rs1,
-            decoded_instr_i[i].rs2,
-            decoded_instr_i[i].rd,
-            decoded_instr_i[i].result,
-            decoded_instr_i[i].use_imm,
-            decoded_instr_i[i].ex.valid
-            };
+          rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
         end
 
         //always update dependency based on newly issued instr
@@ -260,8 +234,14 @@ module reservation_station
     speculative_updated_regs = '0;
 
     //removing instr after it was selected to be executed
-    //or because of rollback triggered by exception or branch miss.
-    rs_n.free_entries = free_entries_masked[CVA6Cfg.NrIssuePorts];
+    //or because of rollback triggered exception or branch miss.
+
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (we_i[i] && decoded_instr_ack_i[i] && empty_mask[i] == 1'b0) begin
+        rs_n.free_entries = free_entries_masked[i+1];
+      end
+    end
+
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
       allocated_by_p0 = (CVA6Cfg.NrIssuePorts > 0) && (i == alloc_idx[0]) && we_i[0] && decoded_instr_ack_i[0] && empty_mask[0] == 1'b0;
       allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_ack_i[1] && empty_mask[1] == 1'b0;
@@ -530,7 +510,7 @@ module reservation_station
         if (decoded_instr_i[1].ex.valid || decoded_instr_i[1].fu == NONE)
           rs_n.valid_regs[i] = '1;
       end else begin
-        if (rs_q.rs_table[i].ex_valid || rs_q.rs_table[i].fu == NONE)
+        if (rs_q.rs_table[i].ex.valid || rs_q.rs_table[i].fu == NONE)
           rs_n.valid_regs[i] = '1;
       end
     end

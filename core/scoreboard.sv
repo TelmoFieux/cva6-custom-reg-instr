@@ -59,12 +59,6 @@ module scoreboard
     input  logic              [CVA6Cfg.NrIssuePorts-1:0]       decoded_instr_valid_i,
     // Handshake's acknowlege with decode stage - ISSUE_STAGE
     input logic              [CVA6Cfg.NrIssuePorts-1:0]       decoded_instr_ack_i,
-
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] dispatch_instr_trans_id_i,
-
-    // instruction to issue logic, if issue_instr_valid and issue_ready is asserted, advance the issue pointer
-    // Entry about the instruction to issue - ISSUE_READ_OPERANDS
-    output scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       dispatch_instr_o,
     // Instruction to issue - ISSUE_READ_OPERANDS
     output logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_o,
     // Is there an instruction to issue - ISSUE_READ_OPERANDS
@@ -219,9 +213,6 @@ module scoreboard
   always_comb begin
     orig_instr_o  = orig_instr_i;
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      // make sure we assign the correct trans ID
-      dispatch_instr_o[i] = mem_q[dispatch_instr_trans_id_i[i]].sbe;
-
       issue_instr_valid_o[i]    = decoded_instr_valid_i[i] & ~issue_full[i] & (state_q == NORMAL);
     end
   end
