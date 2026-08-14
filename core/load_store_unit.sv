@@ -183,25 +183,6 @@ module load_store_unit
   logic                             pop_st;
   logic                             pop_ld;
 
-  // ------------------------------
-  // Address Generation Unit (AGU)
-  // ------------------------------
-  // virtual address as calculated by the AGU in the first cycle
-  logic      [    CVA6Cfg.VLEN-1:0] vaddr_i;
-  logic      [    CVA6Cfg.XLEN-1:0] vaddr_xlen;
-  logic                             overflow;
-  logic                             g_overflow;
-  logic      [(CVA6Cfg.XLEN/8)-1:0] be_i;
-
-  assign vaddr_xlen = $unsigned($signed(fu_data_i.imm) + $signed(fu_data_i.operand_a));
-  assign vaddr_i = vaddr_xlen[CVA6Cfg.VLEN-1:0];
-  // we work with SV39 or SV32, so if VM is enabled, check that all bits [XLEN-1:38] or [XLEN-1:31] are equal
-  assign overflow = (CVA6Cfg.IS_XLEN64 && (!((&vaddr_xlen[CVA6Cfg.XLEN-1:CVA6Cfg.SV-1]) == 1'b1 || (|vaddr_xlen[CVA6Cfg.XLEN-1:CVA6Cfg.SV-1]) == 1'b0)));
-  if (CVA6Cfg.RVH) begin : gen_g_overflow_hyp
-    assign g_overflow = (CVA6Cfg.IS_XLEN64 && (!((|vaddr_xlen[CVA6Cfg.XLEN-1:CVA6Cfg.SVX]) == 1'b0)));
-  end else begin : gen_g_overflow_no_hyp
-    assign g_overflow = 1'b0;
-  end
 
   logic                    st_valid_i;
   logic                    ld_valid_i;
@@ -244,8 +225,6 @@ module load_store_unit
   exception_t                               ld_ex;
   exception_t                               st_ex;
 
-  logic                                     hs_ld_st_inst;
-  logic                                     hlvx_inst;
 
   logic [1:0] sum, mxr;
   logic [CVA6Cfg.PPNW-1:0] satp_ppn[2:0];
@@ -569,45 +548,6 @@ module load_store_unit
       // not relevant for the LSU
       default: ;
     endcase
-  end
-
-  // ------------------------
-  // Hypervisor Load/Store
-  // ------------------------
-  // determine whether this is a hypervisor load or store
-  if (CVA6Cfg.RVH) begin
-    always_comb begin : hyp_ld_st
-      // check the operator to activate the right functional unit accordingly
-      hs_ld_st_inst = 1'b0;
-      hlvx_inst     = 1'b0;
-      case (lsu_ctrl.operation)
-        // all loads go here
-        HLV_B, HLV_BU, HLV_H, HLV_HU, HLV_W, HSV_B, HSV_H, HSV_W, HLV_WU, HLV_D, HSV_D: begin
-          hs_ld_st_inst = 1'b1;
-        end
-        HLVX_WU, HLVX_HU: begin
-          hs_ld_st_inst = 1'b1;
-          hlvx_inst     = 1'b1;
-        end
-        default: ;
-      endcase
-    end
-  end else begin
-    assign hs_ld_st_inst = 1'b0;
-    assign hlvx_inst     = 1'b0;
-  end
-
-  // ---------------
-  // Byte Enable
-  // ---------------
-  // we can generate the byte enable from the virtual address since the last
-  // 12 bit are the same anyway
-  // and we can always generate the byte enable from the address at hand
-
-  if (CVA6Cfg.IS_XLEN64) begin : gen_8b_be
-    assign be_i = be_gen(vaddr_i[2:0], extract_transfer_size(fu_data_i.operation));
-  end else begin : gen_4b_be
-    assign be_i = be_gen_32(vaddr_i[1:0], extract_transfer_size(fu_data_i.operation));
   end
 
   // ------------------------

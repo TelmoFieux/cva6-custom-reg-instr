@@ -142,7 +142,7 @@ module issue_stage
     input logic x_we_i,
     // CVXIF destination register - EX_STAGE
     input logic [4:0] x_rd_i,
-    // Destination register in register file - COMMIT_STAGE
+    // Destination register in register file - EX_STAGE
     input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
     // csr write address - COMMIT_STAGE
     input logic [CVA6Cfg.RegAddrWidth-1:0] csr_waddr_i,
@@ -712,7 +712,6 @@ module issue_stage
       .fpr_we_o,
       .rvfi_issue_pointer_o,
       .rvfi_commit_pointer_o,
-      .fu_data_i               (fu_data_o),
       .lsu_valid_i             (lsu_valid_o),
       .rollback_rd_o           (rollback_rd_i),
       .rollback_id_o,

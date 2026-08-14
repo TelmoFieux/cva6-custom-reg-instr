@@ -98,8 +98,6 @@ module scoreboard
     output logic [ CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_issue_pointer_o,
     // Commit pointer - RVFI
     output logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rvfi_commit_pointer_o,
-    // data sent to ex stage - ISSUE_READ_OPERANDS
-    input  fu_data_t [CVA6Cfg.NrIssuePorts-1:0]                         fu_data_i,
     // is lsu valid - ISSUE_READ_OPERANDS
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                             lsu_valid_i,
 

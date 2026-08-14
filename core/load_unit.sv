@@ -204,13 +204,7 @@ module load_unit
 
   // page offset is defined as the lower 12 bits, feed through for address checker
   assign page_offset_o = lsu_ctrl_i.vaddr[11:0];
-  // feed-through the virtual address for VA translation
-  assign vaddr_o = lsu_ctrl_i.vaddr;
-  assign hs_ld_st_inst_o = CVA6Cfg.RVH ? lsu_ctrl_i.hs_ld_st_inst : 1'b0;
-  assign hlvx_inst_o = CVA6Cfg.RVH ? lsu_ctrl_i.hlvx_inst : 1'b0;
-  // feed-through the transformed instruction for mmu
-  assign tinst_o = CVA6Cfg.RVH ? lsu_ctrl_i.tinst : '0;
-  // this is a read-only interface so set the write enable to 0
+
   assign req_port_o.data_we = 1'b0;
   assign req_port_o.data_wdata = '0;
   // compose the load buffer write data, control is handled in the FSM
@@ -226,12 +220,6 @@ module load_unit
                                               CVA6Cfg.DCACHE_INDEX_WIDTH];
   // request id = index of the load buffer's entry
   assign req_port_o.data_id = ldbuf_windex;
-  // directly forward exception fields (valid bit is set below)
-  assign ex_o.cause = ex_i.cause;
-  assign ex_o.tval = ex_i.tval;
-  assign ex_o.tval2 = CVA6Cfg.RVH ? ex_i.tval2 : '0;
-  assign ex_o.tinst = CVA6Cfg.RVH ? ex_i.tinst : '0;
-  assign ex_o.gva = CVA6Cfg.RVH ? ex_i.gva : 1'b0;
 
   // Check that NI operations follow the necessary conditions
   logic paddr_ni;

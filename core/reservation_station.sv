@@ -233,8 +233,6 @@ module reservation_station
     forwarding_updated_regs = '0;
     speculative_updated_regs = '0;
 
-    //removing instr after it was selected to be executed
-    //or because of rollback triggered exception or branch miss.
 
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (we_i[i] && decoded_instr_ack_i[i] && empty_mask[i] == 1'b0) begin
@@ -242,6 +240,8 @@ module reservation_station
       end
     end
 
+    //removing instr after it was selected to be executed
+    //or because of rollback triggered exception or branch miss.
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
       allocated_by_p0 = (CVA6Cfg.NrIssuePorts > 0) && (i == alloc_idx[0]) && we_i[0] && decoded_instr_ack_i[0] && empty_mask[0] == 1'b0;
       allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_ack_i[1] && empty_mask[1] == 1'b0;
