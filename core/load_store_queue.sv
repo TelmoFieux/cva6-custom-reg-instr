@@ -28,9 +28,14 @@ module load_store_queue
     output logic [CVA6Cfg.NrCommitPorts-1:0]                          full_o,
     input logic                                                       commit_i, //commit latest store
     input logic [CVA6Cfg.TRANS_ID_BITS-1:0]                           commit_trans_id_i,
+    // Presence of non-idempotent operations in the D$ write buffer - CACHES
+    input logic                                                       dcache_wbuffer_not_ni_i
 
     input logic                                                       rollback_i, // architectural register to rollback
     input logic [CVA6Cfg.TRANS_ID_BITS-1:0]                           rollback_trans_id_i, // rollback is enabled
+    // Store dispatched trans_id - SCOREBOARD
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                          store_dispatched_id_o, // je pense que c'est plus nécessaire dans ce design
+
 
 
     input logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_we_i,
@@ -80,12 +85,17 @@ module load_store_queue
 
 
 
-    // reserved id - ISSUE_STAGE
-    output logic lsu_ctrl_t                                           ld_lsu_ctrl_o,
-    output logic lsu_ctrl_t                                           st_lsu_ctrl_o,
-    output logic                                                      dispatched_instr_vaild_o,
+    // Data sent to store buffer
+    output logic lsu_ctrl_t                                           st_buf_lsu_ctrl_o,
+    output logic                                                      st_buf_valid_o,
+    output logic [CVA6Cfg.PLEN-1:0]                                   st_buf_paddr_o,
+    // store sent to cache
+    input logic                                                       st_sent_to_cache_i,
+
+    output logic lsu_ctrl_t                                           ld_unit_lsu_ctrl_o,
+    output logic                                                      ld_unit_valid_o,
+    output logic [CVA6Cfg.PLEN-1:0]                                   ld_unit_paddr_o,
     input logic                                                       load_ready_i,
-    input logic                                                       store_ready_i,
 
 
 
@@ -149,7 +159,7 @@ module load_store_queue
     logic [LSQ_DEPTH-1:0][LSQ_DEPTH-1:0] matching_addr;
     logic [LSQ_DEPTH-1:0][LSQ_DEPTH-1:0] partial_matching_addr;
     logic [LSQ_DEPTH-1:0][CVA6Cfg.XLEN-1:0] result; // store imm value to compute vaddr
-    exception_t [LSQ_DEPTH-1:0] ex;
+    logic [LSQ_DEPTH-1:0] ex_valid;
   } st_queue_t;
 
   typedef struct packed {
@@ -168,18 +178,39 @@ module load_store_queue
     exception_t [LSQ_DEPTH-1:0] ex;
   } ld_queue_t;
 
-  assign full_o[0] = ld_we_i[0] ? ld_full[0] : st_full[0];
-  assign full_o[1] = ld_we_i[1] ? ld_full[1] : st_full[1];
+  for (genvar i = 0; i<CVA6Cfg.NrCommitPorts-1 ; i++) begin
+    full_o[i] = ld_we_i[i] ? ld_full[i] : st_commit_pointer_q == st_issue_pointer_q + i;
+  end
+
+  // Data sent to store buffer for execution
+  assign st_buf_lsu_ctrl_o = st_queue_q.instr[st_commit_pointer_q];
+  assign st_buf_paddr_o = st_queue_q.paddr[st_commit_pointer_q];
+  assign st_buf_valid_o = st_queue_q.ready[st_commit_pointer_q] & !st_queue_q.ex_valid[i];
+
+  // Data sent to load unit for execution
+  assign ld_unit_lsu_ctrl_o = ld_queue_q.instr[ld_ready_pointer];
+  assign ld_unit_paddr_o = ld_queue_q.paddr[ld_ready_pointer];
+  assign ld_unit_valid_o = ld_queue_q.ready[ld_ready_pointer] & !ld_queue_q.ex[i].valid;
 
   st_queue_t st_queue_n, st_queue_q;
   ld_queue_t ld_queue_n, ld_queue_q;
 
   logic [$clog2(LSQ_DEPTH)-1:0] st_commit_pointer_n, st_commit_pointer_q;
+  logic [$clog2(LSQ_DEPTH)-1:0] st_issue_pointer_n, st_issue_pointer_q;
+  logic [$clog2(LSQ_DEPTH)-1:0] st_drain_pointer_n, st_drain_pointer_q;
 
   logic [$clog2(LSQ_DEPTH)-1:0] translation_pointer_n, translation_pointer_q;
   logic translation_pointer_valid_n, translation_pointer_valid_q;
   logic translation_pointer_type_n, translation_pointer_type_q;
   logic translation_data_valid_n, translation_data_valid_q;
+
+
+  //store to load forwarding signals
+  logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] full_match_winner_k, partial_match_winner_k;
+  logic [LSQ_DEPTH-1:0] full_no_match, partial_no_match;
+  logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] full_match_winner_idx, partial_match_winner_idx;
+  logic [LSQ_DEPTH-1:0][LSQ_DEPTH-1:0] full_match_rotated_mask;
+  logic [LSQ_DEPTH-1:0][LSQ_DEPTH-1:0] partial_match_rotated_mask;
 
 
   logic ld_full, st_full;
@@ -195,6 +226,30 @@ module load_store_queue
   logic      [CVA6Cfg.NrCommitPorts-1:0]                      hlvx_inst;
   logic      [CVA6Cfg.NrIssuePorts-1:0][    CVA6Cfg.XLEN-1:0] st_data;
 
+
+  logic [LSQ_DEPTH-1:0] ld_ready_tournament_valid;
+  logic [LSQ_DEPTH-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] ld_ready_tournament_seq_num;
+  logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] ld__ready_tournament_id;
+
+  for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
+    assign ld_ready_tournament_seq_num[i] = ld_queue_q.instr[i].global_rs_id;
+    assign ld_ready_tournament_valid[i] = ld_queue_q.ready[i] & ~(ld_queue_q.paddr_ni[i] & !dcache_wbuffer_not_ni_i);
+    assign ld_ready_tournament_id[i] = i;
+  end
+
+  logic [$clog2(LSQ_DEPTH)-1:0] ld_ready_pointer;
+  logic ld_ready_pointer_valid;
+
+  tournament_tree #(
+      .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
+      .NR_PLAYER(LSQ_DEPTH)
+    ) i_ld_tournament_tree (
+      .valid_i    (ld_ready_tournament_valid),
+      .seq_num_i  (ld_ready_tournament_seq_num),
+      .id_i       (ld_ready_tournament_id),
+      .winner_o   (ld_ready_pointer),
+      .winner_valid_o (ld_ready_pointer_valid)
+  );
 
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : decoded_req_alloc
     // ------------------------
@@ -229,12 +284,11 @@ module load_store_queue
   // LSQ Queue updates
   // ---------------
 
-  logic [CVA6Cfg.NrIssuePorts:0][LSQ_DEPTH-1:0] ld_free_entries_masked, st_free_entries_masked;
-  logic [CVA6Cfg.NrIssuePorts-1:0] ld_empty_mask, st_empty_mask;
-  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(LSQ_DEPTH):0] ld_alloc_idx, st_alloc_idx;
+  logic [CVA6Cfg.NrIssuePorts:0][LSQ_DEPTH-1:0] ld_free_entries_masked;
+  logic [CVA6Cfg.NrIssuePorts-1:0] ld_empty_mask;
+  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(LSQ_DEPTH):0] ld_alloc_idx;
 
   assign ld_free_entries_masked[0] = ld_queue_q.reserved;
-  assign st_free_entries_masked[0] = st_queue_q.reserved;
 
   //priority encoder cascade to get free index in load queue
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
@@ -252,48 +306,8 @@ module load_store_queue
         ld_free_entries_masked[i];
   end
 
-  //priority encoder cascade to get free index in store queue
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
-      lzc #(
-          .WIDTH(NR_RS_ENTRIES),
-          .MODE(1'b0))
-      i_lzc (
-          .in_i   (st_free_entries_masked[i]),
-          .cnt_o  (st_alloc_idx[i]),
-          .empty_o(st_empty_mask[i])
-      );
-
-      assign st_free_entries_masked[i+1] = (st_we_i[i] && decoded_instr_valid_i[i] && st_empty_mask[i] == 1'b0) ?
-        (st_free_entries_masked[i] & ~(NR_RS_ENTRIES'(1) << st_alloc_idx[i])) :
-        st_free_entries_masked[i];
-  end
-
   assign ld_full = ld_empty_mask;
   assign st_full = st_empty_mask;
-
-  logic [LSQ_DEPTH-1:0] forwarding_tournament_valid;
-  logic [LSQ_DEPTH-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] forwarding_tournament_seq_num;
-  logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] forwarding_tournament_id;
-
-  for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
-    assign forwarding_tournament_seq_num[i] = st_queue_q.instr[i].global_rs_id;
-    assign forwarding_tournament_valid[i] = st_queue_q.reserved[i] && st_queue_q.vaddr_valid[i] && st_queue_q.paddr_valid[i];
-    assign forwarding_tournament_id[i] = i;
-  end
-
-  logic [$clog2(LSQ_DEPTH)-1:0] forwarding_translation_pointer;
-  logic forwarding_translation_pointer_valid;
-
-  tournament_tree #(
-      .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
-      .NR_PLAYER(LSQ_DEPTH)
-    ) i_forwarding_tournament_tree (
-      .valid_i    (forwarding_tournament_valid),
-      .seq_num_i  (forwarding_tournament_seq_num),
-      .id_i       (forwarding_tournament_id),
-      .winner_o   (forwarding_translation_pointer),
-      .winner_valid_o (forwarding_translation_pointer_valid)
-  );
 
   always_comb begin : updating_queues
 
@@ -372,8 +386,6 @@ module load_store_queue
     end
 
     // Load queue initialisation
-    // TODO : check "dcache_wbuffer_not_ni_i" comme signal qui est le seul qu'in a pas traité de la
-    // load unit. il faut voir si il m'est utile
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (ld_we_i[i] && decoded_instr_ack_i[i] && !ld_full[i]) begin
         ld_queue_n.reserved = ld_free_entries_masked[i+1];
@@ -386,24 +398,24 @@ module load_store_queue
     end
 
     //store queue initialisation
-    //TODO: Il faut probablement rappasser la store queue en buffer circulaire, pour le write back
-    //on fera juste en sorte de ne pas rendre la place disponible de toute façon ça n'impacte pas
-    //les perf puisqu'un flush arrivera. ça évite d'instancier des arbre de tournoi pour rien
-    //TODO : Il manque des info pour les store regarder les entrées du store buffer. y'a des
-    //histoire de réalignement.
+    automatic logic [LSQ_DEPTH-1:0] st_issue_pointer;
+    st_issue_pointer = st_issue_pointer_q;
+
     for (int unsigned i = 0 ; i < CVA6Cfg.NrIssuePorts ; i++) begin
       if (st_we_i[i] && !st_full[i] && decoded_instr_ack_i[i]) begin
-        st_queue_n.reserved = st_free_entries_masked[i+1];
-        st_queue_n.instr[st_alloc_idx[i]] = decoded_req[i];
-        st_queue_n.ready[st_alloc_idx[i]] = '0;
-        st_queue_n.result[st_alloc_idx[i]] = fu_data_i[i].imm;
-        st_queue_n.data_valid[st_alloc_idx[i]] = data_is_valid[i];
-        st_queue_n.vaddr_valid[st_alloc_idx[i]] = vaddr_is_valid[i];
-        st_queue_n.vaddr_reg_addr[st_alloc_idx[i]] = vaddr_reg_addr_i[i];
-        st_queue_n.data_reg_addr[st_alloc_idx[i]] = data_reg_addr_i[i];
-        st_alloc_idx[i] = st_alloc_idx[i] + 1'b1;
+        st_queue_n.reserved[st_issue_pointer] = 1'b1;
+        st_queue_n.instr[st_issue_pointer] = decoded_req[i];
+        st_queue_n.ready[st_issue_pointer] = '0;
+        st_queue_n.result[st_issue_pointer] = fu_data_i[i].imm;
+        st_queue_n.data_valid[st_issue_pointer] = data_is_valid[i];
+        st_queue_n.vaddr_valid[st_issue_pointer] = vaddr_is_valid[i];
+        st_queue_n.vaddr_reg_addr[st_issue_pointer] = vaddr_reg_addr_i[i];
+        st_queue_n.data_reg_addr[st_issue_pointer] = data_reg_addr_i[i];
+        st_issue_pointer = st_issue_pointer + 1'b1;
       end
     end
+
+    st_issue_pointer_n = st_issue_pointer;
 
     automatic logic [1:0][CVA6Cfg.VLEN-1:0]     snooped_vaddr;
     automatic logic [1:0][CVA6Cfg.XLEN-1:0]     snooped_vaddr_xlen;
@@ -520,6 +532,7 @@ module load_store_queue
       st_trans_id_o = st_queue_q.instr[translation_pointer_q].trans_id;
       st_ex_o = ex_i;
       st_valid_o = 1'b1;
+      st_queue_n.ex_valid[translation_pointer_q] = 1'b1;
     end
 
     // ---------------
@@ -541,7 +554,7 @@ module load_store_queue
       if(ld_paddr_valid[i]) begin
         for (int unsigned j = 0; j<LSQ_DEPTH; j ++) begin
           if(st_paddr_valid[j]) begin
-            if (ld_paddr[i] == st_paddr[j]) begin
+            if (ld_paddr[i] == st_paddr[j] && extract_transfer_size(st_queue_q.instr[i].operation) == extract_transfer_size(ld_queue_q.instr[j].operation)) begin
               st_queue_n.matching_addr[i][j] = 1'b1;
               ld_queue_n.matching_addr[j][i] = 1'b1;
             end else if (overlap_check(ld_queue_q.instr[i].operation, ld_paddr, st_queue_q.instr[i].operation, st_paddr)) begin
@@ -612,8 +625,8 @@ module load_store_queue
         if (ld_queue_q.paddr_ni[i]) begin
           ld_queue_n.ready[i] = ld_queue_q.ready[i] || commit_trans_id_i == ld_queue_q.instr[i].trans_id;
         end else begin
-          if (|st_older) begin
-            if (~|(st_older & st_older_paddr_valid)) begin
+          if (|st_older[i]) begin
+            if (!st_older_paddr_valid[i]) begin
               ld_queue_n.ready[i] = 1'b0;
             end else begin
               for (int unsigned j = 0; j<LSQ_DEPTH; j ++) begin
@@ -627,29 +640,93 @@ module load_store_queue
       end
     end
 
+
     // ---------------
     // Store to Load forwarding
     // ---------------
 
+     for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
+      assign full_match_rotated_mask[i] = ({ld_queue_q.matching_addr[i], ld_queue_q.matching_addr[i]} >> st_commit_pointer_q)[LSQ_DEPTH-1:0];
+      assign partial_match_rotated_mask[i] = ({ld_queue_q.partial_matching_addr[i], ld_queue_q.partial_matching_addr[i]} >> st_commit_pointer_q)[LSQ_DEPTH-1:0];
+    end
 
-    //TODO: Faire le store to load forwarding. Voir comment obtenir l'instruction la plus récente
-    //qui prrécède un load de façon efficace.
+
+    for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
+
+      lzc #(.WIDTH(LSQ_DEPTH), .MODE(1'b1)) i_youngest_full_match (
+          .in_i   (full_match_rotated_mask[i]),
+          .cnt_o  (full_match_winner_k[i]),
+          .empty_o(full_no_match[i])
+      );
+
+      lzc #(.WIDTH(LSQ_DEPTH), .MODE(1'b1)) i_youngest_partial_match (
+          .in_i   (partial_match_rotated_mask[i]),
+          .cnt_o  (partial_match_winner_k[i]),
+          .empty_o(partial_no_match[i])
+      );
+
+      // only works if depth is a power of 2
+      assign full_match_winner_idx[i] = st_commit_pointer_q + (LSQ_DEPTH - 1 - full_match_winner_k[i]);
+      assign partial_match_winner_idx[i] = st_commit_pointer_q + ( LSQ_DEPTH - 1 - partial_match_winner_k[i];
+    end
+
 
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
-      if(st_queue_q.paddr_valid[i] && data_valid[i] && st_queue_q.reserved[i]) begin
-        for (int unsigned j = 0; j<LSQ_DEPTH; j ++) begin
-          if(st_queue_q.matching_addr[i][j]) begin
-            if (is_older(st_queue_q.instr[i].global_id, ld_queue_q.instr[j].global_id)
-                && !ld_queue_q.paddr_ni[j]
-                && extract_transfer_size(st_queue_q.instr[i].operation) == extract_transfer_size(ld_queue_q.instr[j].operation)) begin
-                ld_queue_n.result[j] = data[i];
-                ld_queue_n.result_valid[j] = 1'b1;
+      if(ld_queue_q.paddr_valid[i] & ld_queue_q.reserved[i] & !ld_queue_q.paddr_ni[i]) begin
+        // only forward if all data is available
+        if (st_older_all_valid[i]) begin
+          if (!full_no_match[i]) begin
+            if (!partial_no_match[i]) begin
+              if (!is_older(st_queue_q.instr[full_match_winner_idx].global_id, st_queue_q.instr[partial_match_winner_idx].global_id)) begin
+                ld_queue_n.result_valid[i] = 1'b1;
+                ld_queue_n.result[i] = data;
               end
+            end else begin
+              ld_queue_n.result_valid[i] = 1'b1;
+              ld_queue_n.result[i] = data;
             end
           end
         end
       end
     end
+
+    // ---------------
+    // Issuing to store and load unit
+    // ---------------
+
+    //store unit
+
+    st_commit_pointer_n = st_commit_pointer_q;
+    st_drain_pointer_n = st_drain_pointer_q;
+
+    if (st_queue_q.instr[st_commit_pointer_q].ready & !st_queue_q.ex_valid[st_commit_pointer_q] & commit_i) begin
+      st_commit_pointer_n = st_commit_pointer_n + 1'b1;
+    end
+
+    if(st_sent_to_cache_i) begin
+      st_queue_n.ready[st_drain_pointer_q] = '0;
+      st_queue_n.reserved[st_drain_pointer_q] = '0;
+      st_queue_n.vaddr_valid[st_drain_pointer_q] = '0;
+      st_queue_n.data_valid[st_drain_pointer_q] = '0;
+      st_queue_n.paddr_valid[st_drain_pointer_q] = '0;
+      st_queue_n.matching_addr[st_drain_pointer_q] = '0;
+      st_queue_n.partial_matching_addr[st_drain_pointer_q] = '0;
+      st_queue_n.ex_valid[st_drain_pointer_q] = '0;
+      st_drain_pointer_n = st_drain_pointer_n + 1'b1;
+    end
+
+    //TODO : Gérer correctement la réception des données par la load unit qui est un peu massacré
+    //à l'heure actuelle
+    //load write back
+    //if :
+    //- exception
+    //- forwarding
+    //- data receive from load unit
+    //il faut aussi gérer les conflit si on a plusieurs données valide en même temps
+    //Si possible faire du "path through" pour améliorer les perf. Genre data forwarded => same
+    //cycle write back. Ou load unit result => same cycle write back. Pour la load unit c'est
+    //facilement faisable je pense étant donnés que c'est comme ça que ça fonctionne de base mais
+    //pour le forwarding ça peu poser de serieux problème de timing je pense. On verra
 
 
   end
@@ -739,25 +816,9 @@ module load_store_queue
     end
   end
 
-  // Check readyness and store to load forwarding
 
-  // choose instruction to issue to each unit and retrieve result
 
   // Manage write back and commit for stores
-
-  // Rollback
-
-
-
-
-  // ---------------
-  // store to load forwarding
-  // ---------------
-
-  // We need to take into account :
-  // - dependencies based on
-
-  // Issuing instruction and store to load forwarding
 
   // Commit store
 
@@ -770,6 +831,9 @@ module load_store_queue
     if (!rst_ni) begin
       st_queue_q <= '0;
       ld_queue_q <= '0;
+      st_issue_pointer_q = '0;
+      st_drain_pointer_q = '0;
+      st_commit_pointer_q = '0;
       translation_pointer_q = '0;
       translation_pointer_valid_q = '0;
       translation_data_valid_q = '0;
@@ -777,6 +841,9 @@ module load_store_queue
     end else begin
       st_queue_q <= st_queue_n;
       ld_queue_q <= ld_queue_n;
+      st_issue_pointer_q = st_issue_pointer_n;
+      st_drain_pointer_q = st_drain_pointer_n;
+      st_commit_pointer_q = st_commit_pointer_n;
       translation_data_valid_q = translation_data_valid_n;
       translation_pointer_q = translation_pointer_n;
       translation_pointer_valid_q = translation_pointer_valid_n;

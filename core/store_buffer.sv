@@ -21,40 +21,34 @@ module store_buffer
     parameter type dcache_req_i_t = logic,
     parameter type dcache_req_o_t = logic
 ) (
-    input logic clk_i,  // Clock
-    input logic rst_ni,  // Asynchronous reset active low
-    input logic flush_i,  // if we flush we need to pause the transactions on the memory
-                          // otherwise we will run in a deadlock with the memory arbiter
-    input logic [CVA6Cfg.RollbackWidth-1:0] rollback_en_i,
-    input logic stall_st_pending_i,  // Stall issuing non-speculative request
-    output logic         no_st_pending_o, // non-speculative queue is empty (e.g.: everything is committed to the memory hierarchy)
-    output logic         store_buffer_empty_o, // there is no store pending in neither the speculative unit or the non-speculative queue
+    input  logic                          clk_i,  // Clock
+    input  logic                          rst_ni,  // Asynchronous reset active low
+    input  logic                          flush_i,  // if we flush we need to pause the transactions on the memory
+                                                    // otherwise we will run in a deadlock with the memory arbiter
+    input  logic                          stall_st_pending_i,  // Stall issuing non-speculative request
+    output logic                          no_st_pending_o, // non-speculative queue is empty (e.g.: everything is committed to the memory hierarchy)
 
-    input  logic [11:0]  page_offset_i,         // check for the page offset (the last 12 bit if the current load matches them)
-    output logic         page_offset_matches_o, // the above input page offset matches -> let the store buffer drain
+    input  logic                          commit_i,  // commit the instruction which was placed there most recently
+    input  logic                          store_buffer_valid_i,
+    output logic                          commit_ready_o,  // commit queue is ready to accept another commit request
+                                                     // it is only ready if it can unconditionally commit the instruction, e.g.:
+                                                     // the commit buffer needs to be empty
+                                                     //
 
-    input logic commit_i,  // commit the instruction which was placed there most recently
-    output logic commit_ready_o,  // commit queue is ready to accept another commit request
-    output logic ready_o,  // the store queue is ready to accept a new request
-                           // it is only ready if it can unconditionally commit the instruction, e.g.:
-                           // the commit buffer needs to be empty
-    input logic valid_i,  // this is a valid store
-    input  logic         valid_without_flush_i, // just tell if the address is valid which we are current putting and do not take any further action
+    input  logic [CVA6Cfg.PLEN-1:0]       paddr_i,         // physical address of store which needs to be placed in the queue
+    output logic [CVA6Cfg.PLEN-1:0]       rvfi_mem_paddr_o,
+    input  logic [CVA6Cfg.XLEN-1:0]       data_i,  // data which is placed in the queue
+    input  logic [(CVA6Cfg.XLEN/8)-1:0]   be_i,  // byte enable in
+    input  logic [1:0]                    data_size_i,  // type of request we are making (e.g.: bytes to write)
 
-    input  logic [CVA6Cfg.PLEN-1:0]  paddr_i,         // physical address of store which needs to be placed in the queue
-    output logic [CVA6Cfg.PLEN-1:0] rvfi_mem_paddr_o,
-    input logic [CVA6Cfg.XLEN-1:0] data_i,  // data which is placed in the queue
-    input logic [(CVA6Cfg.XLEN/8)-1:0] be_i,  // byte enable in
-    input logic [1:0] data_size_i,  // type of request we are making (e.g.: bytes to write)
+    // a store request has been sent to the cache - LOAD_STORE_QUEUE
+    output logic                          sent_to_cache_o,
 
     // D$ interface
     input  dcache_req_o_t req_port_i,
     output dcache_req_i_t req_port_o
 );
 
-  // the store queue has two parts:
-  // 1. Speculative queue
-  // 2. Commit queue which is non-speculative, e.g.: the store will definitely happen.
   struct packed {
     logic [CVA6Cfg.PLEN-1:0] address;
     logic [CVA6Cfg.XLEN-1:0] data;
@@ -62,86 +56,15 @@ module store_buffer
     logic [1:0] data_size;
     logic valid;  // this entry is valid, we need this for checking if the address offset matches
   }
-      speculative_queue_n[DEPTH_SPEC-1:0],
-      speculative_queue_q[DEPTH_SPEC-1:0],
       commit_queue_n[DEPTH_COMMIT-1:0],
       commit_queue_q[DEPTH_COMMIT-1:0];
 
   // keep a status count for both buffers
-  logic [$clog2(DEPTH_SPEC):0] speculative_status_cnt_n, speculative_status_cnt_q;
   logic [$clog2(DEPTH_COMMIT):0] commit_status_cnt_n, commit_status_cnt_q;
-  // Speculative queue
-  logic [$clog2(DEPTH_SPEC)-1:0] speculative_read_pointer_n, speculative_read_pointer_q;
-  logic [$clog2(DEPTH_SPEC)-1:0] speculative_write_pointer_n, speculative_write_pointer_q;
   // Commit Queue
   logic [$clog2(DEPTH_COMMIT)-1:0] commit_read_pointer_n, commit_read_pointer_q;
   logic [$clog2(DEPTH_COMMIT)-1:0] commit_write_pointer_n, commit_write_pointer_q;
 
-  assign store_buffer_empty_o = (speculative_status_cnt_q == 0) & no_st_pending_o;
-  // ----------------------------------------
-  // Speculative Queue - Core Interface
-  // ----------------------------------------
-  always_comb begin : core_if
-    automatic logic [$clog2(DEPTH_SPEC):0] speculative_status_cnt;
-    automatic logic [$clog2(DEPTH_SPEC)-1:0] rollback_pointer;
-    speculative_status_cnt      = speculative_status_cnt_q;
-
-    // default assignments
-    speculative_read_pointer_n  = speculative_read_pointer_q;
-    speculative_write_pointer_n = speculative_write_pointer_q;
-    speculative_queue_n         = speculative_queue_q;
-    // LSU interface
-    // we are ready to accept a new entry and the input data is valid
-    if (valid_i) begin
-      speculative_queue_n[speculative_write_pointer_q].address = paddr_i;
-      speculative_queue_n[speculative_write_pointer_q].data = data_i;
-      speculative_queue_n[speculative_write_pointer_q].be = be_i;
-      speculative_queue_n[speculative_write_pointer_q].data_size = data_size_i;
-      speculative_queue_n[speculative_write_pointer_q].valid = 1'b1;
-      // advance the write pointer
-      speculative_write_pointer_n = speculative_write_pointer_q + 1'b1;
-      speculative_status_cnt++;
-    end
-
-    // evict the current entry out of this queue, the commit queue will thankfully take it and commit it
-    // to the memory hierarchy
-    if (commit_i) begin
-      // invalidate
-      speculative_queue_n[speculative_read_pointer_q].valid = 1'b0;
-      // advance the read pointer
-      speculative_read_pointer_n = speculative_read_pointer_q + 1'b1;
-      speculative_status_cnt--;
-    end
-
-    speculative_status_cnt_n = speculative_status_cnt;
-
-    rollback_pointer = speculative_write_pointer_n;
-
-    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
-      if (rollback_en_i[i]) begin
-        rollback_pointer = rollback_pointer - 1'b1;
-        speculative_queue_n[rollback_pointer].valid = 1'b0;
-        speculative_status_cnt_n = speculative_status_cnt_n - 1;
-      end
-    end
-
-    if (|rollback_en_i) begin
-      speculative_write_pointer_n = rollback_pointer;
-    end
-
-    // when we flush evict the speculative stores
-    if (flush_i) begin
-      // reset all valid flags
-      for (int unsigned i = 0; i < DEPTH_SPEC; i++) speculative_queue_n[i].valid = 1'b0;
-
-      speculative_write_pointer_n = speculative_read_pointer_q;
-      // also reset the status count
-      speculative_status_cnt_n = 'b0;
-    end
-
-    // we are ready if the speculative and the commit queue have a space left
-    ready_o = (speculative_status_cnt_n < (DEPTH_SPEC)) || commit_i;
-  end
 
   // ----------------------------------------
   // Commit Queue - Memory Interface
@@ -166,7 +89,6 @@ module store_buffer
   assign req_port_o.data_be = commit_queue_q[commit_read_pointer_q].be;
   assign req_port_o.data_size = commit_queue_q[commit_read_pointer_q].data_size;
 
-  assign rvfi_mem_paddr_o = speculative_queue_q[speculative_read_pointer_q].address;
 
   always_comb begin : store_if
     automatic logic [$clog2(DEPTH_COMMIT):0] commit_status_cnt;
@@ -183,10 +105,12 @@ module store_buffer
 
     req_port_o.data_req    = 1'b0;
 
+    sent_to_cache_o = 1'b0;
+
     // there should be no commit when we are flushing
-    // if the entry in the commit queue is valid and not speculative anymore we can issue this instruction
     if (commit_queue_q[commit_read_pointer_q].valid && !stall_st_pending_i) begin
       req_port_o.data_req = 1'b1;
+      sent_to_cache_o = 1'b1;
       if (req_port_i.data_gnt) begin
         // we can evict it from the commit buffer
         commit_queue_n[commit_read_pointer_q].valid = 1'b0;
@@ -199,69 +123,17 @@ module store_buffer
     // happened if we got a grant
 
     // shift the store request from the speculative buffer to the non-speculative
-    if (commit_i) begin
-      commit_queue_n[commit_write_pointer_q] = speculative_queue_q[speculative_read_pointer_q];
+    if (commit_i & store_buffer_valid_i) begin
+      commit_queue_n[commit_write_pointer_q].address = paddr_i;
+      commit_queue_n[commit_write_pointer_q].data = data_i;
+      commit_queue_n[commit_write_pointer_q].be = be_i;
+      commit_queue_n[commit_write_pointer_q].data_size = data_size_i;
+      commit_queue_n[commit_write_pointer_q].valid = 1'b1;
       commit_write_pointer_n = commit_write_pointer_n + 1'b1;
       commit_status_cnt++;
     end
 
     commit_status_cnt_n = commit_status_cnt;
-  end
-
-  // ------------------
-  // Address Checker
-  // ------------------
-  // The load should return the data stored by the most recent store to the
-  // same physical address.  The most direct way to implement this is to
-  // maintain physical addresses in the store buffer.
-
-  // Of course, there are other micro-architectural techniques to accomplish
-  // the same thing: you can interlock and wait for the store buffer to
-  // drain if the load VA matches any store VA modulo the page size (i.e.
-  // bits 11:0).  As a special case, it is correct to bypass if the full VA
-  // matches, and no younger stores' VAs match in bits 11:0.
-  //
-  // checks if the requested load is in the store buffer
-  // page offsets are virtually and physically the same
-  always_comb begin : address_checker
-    page_offset_matches_o = 1'b0;
-
-    // check if the LSBs are identical and the entry is valid
-    for (int unsigned i = 0; i < DEPTH_COMMIT; i++) begin
-      // Check if the page offset matches and whether the entry is valid, for the commit queue
-      if ((page_offset_i[11:3] == commit_queue_q[i].address[11:3]) && commit_queue_q[i].valid) begin
-        page_offset_matches_o = 1'b1;
-        break;
-      end
-    end
-
-    for (int unsigned i = 0; i < DEPTH_SPEC; i++) begin
-      // do the same for the speculative queue
-      if ((page_offset_i[11:3] == speculative_queue_q[i].address[11:3]) && speculative_queue_q[i].valid) begin
-        page_offset_matches_o = 1'b1;
-        break;
-      end
-    end
-    // or it matches with the entry we are currently putting into the queue
-    if ((page_offset_i[11:3] == paddr_i[11:3]) && valid_without_flush_i) begin
-      page_offset_matches_o = 1'b1;
-    end
-  end
-
-
-  // registers
-  always_ff @(posedge clk_i or negedge rst_ni) begin : p_spec
-    if (~rst_ni) begin
-      speculative_queue_q         <= '{default: 0};
-      speculative_read_pointer_q  <= '0;
-      speculative_write_pointer_q <= '0;
-      speculative_status_cnt_q    <= '0;
-    end else begin
-      speculative_queue_q         <= speculative_queue_n;
-      speculative_read_pointer_q  <= speculative_read_pointer_n;
-      speculative_write_pointer_q <= speculative_write_pointer_n;
-      speculative_status_cnt_q    <= speculative_status_cnt_n;
-    end
   end
 
   // registers
@@ -289,15 +161,6 @@ module store_buffer
   commit_and_flush :
   assert property (@(posedge clk_i) rst_ni && flush_i |-> !commit_i)
   else $error("[Commit Queue] You are trying to commit and flush in the same cycle");
-
-  speculative_buffer_overflow :
-  assert property (@(posedge clk_i) rst_ni && (speculative_status_cnt_q == DEPTH_SPEC) |-> !valid_i)
-  else
-    $error("[Speculative Queue] You are trying to push new data although the buffer is not ready");
-
-  speculative_buffer_underflow :
-  assert property (@(posedge clk_i) rst_ni && (speculative_status_cnt_q == 0) |-> !commit_i)
-  else $error("[Speculative Queue] You are committing although there are no stores to commit");
 
   commit_buffer_overflow :
   assert property (@(posedge clk_i) rst_ni && (commit_status_cnt_q == DEPTH_COMMIT) |-> !commit_i)
