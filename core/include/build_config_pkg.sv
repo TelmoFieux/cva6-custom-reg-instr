@@ -60,6 +60,7 @@ package build_config_pkg;
     cfg.RegAddrWidth = $clog2(CVA6Cfg.NrPhysReg);
     cfg.GlobalRsIdWidth = CVA6Cfg.GlobalRsIdWidth;
     cfg.RollbackWidth = CVA6Cfg.RollbackWidth;
+    cfg.NrLSQEntries = CVA6Cfg.NrLSQEntries;
     cfg.MEM_TID_WIDTH = CVA6Cfg.MemTidWidth;
     cfg.NrLoadBufEntries = CVA6Cfg.NrLoadBufEntries;
     cfg.RVF = CVA6Cfg.RVF;

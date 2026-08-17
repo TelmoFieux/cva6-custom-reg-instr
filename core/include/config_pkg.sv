@@ -157,6 +157,8 @@ package config_pkg;
     int unsigned                 GlobalRsIdWidth;
     // Number of instruction rollbacked per cycle
     int unsigned                 RollbackWidth;
+    // Size of load and store queue
+    int unsigned                 NrLSQEntries;
     // AXI User width
     int unsigned                 AxiUserWidth;
     // AXI burst in write
@@ -258,6 +260,7 @@ package config_pkg;
     int unsigned NrPhysReg;
     int unsigned GlobalRsIdWidth;
     int unsigned RollbackWidth;
+    int unsigned NrLSQEntries;
     int unsigned MEM_TID_WIDTH;
     int unsigned NrLoadBufEntries;
     bit          RVF;

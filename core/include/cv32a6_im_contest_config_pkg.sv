@@ -74,6 +74,8 @@ package cva6_config_pkg;
   localparam CVA6ConfigNrPhysReg = 44;
   localparam CVA6ConfigGlobalRsIdWidth = 5;
   localparam CVA6ConfigRollbackWidth = 4;
+  // same size for store and load queue
+  localparam CVA6ConfigNrLSQEntries = 2;
 
   localparam config_pkg::cva6_user_cfg_t cva6_cfg = '{
       XLEN: unsigned'(CVA6ConfigXlen),
@@ -93,6 +95,7 @@ package cva6_config_pkg;
       NrPhysReg : unsigned'(CVA6ConfigNrPhysReg),
       GlobalRsIdWidth : unsigned'(CVA6ConfigGlobalRsIdWidth),
       RollbackWidth : unsigned'(CVA6ConfigRollbackWidth),
+      NrLSQEntries : unsigned'(CVA6ConfigNrLSQEntries),
       CMOV: bit'(0),
       RVF: bit'(CVA6ConfigRVF),
       RVD: bit'(0),

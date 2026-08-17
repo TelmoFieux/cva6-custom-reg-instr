@@ -97,14 +97,15 @@ module cva6_hpdcache_if_adapter
       assign hpdcache_req.sid = hpdcache_req_sid_i;
       assign hpdcache_req.tid = cva6_req_i.data_id;
       assign hpdcache_req.need_rsp = 1'b1;
-      assign hpdcache_req.phys_indexed = 1'b0;
-      assign hpdcache_req.addr_tag = '0;  // unused on virtually indexed request
-      assign hpdcache_req.pma.uncacheable = 1'b0;
-      assign hpdcache_req.pma.io = 1'b0;
-      assign hpdcache_req.pma.wr_policy_hint = hpdcache_pkg::HPDCACHE_WR_POLICY_AUTO;
-
+      assign hpdcache_req.phys_indexed = 1'b1;
+      assign hpdcache_req.addr_tag = cva6_req_i.address_tag;  // used because in OoO lsq guarantes the validity of paddr
+      assign hpdcache_req.pma = '{
+                  uncacheable: hpdcache_req_is_uncacheable,
+                  io: 1'b0,
+                  wr_policy_hint: hpdcache_pkg::HPDCACHE_WR_POLICY_AUTO
+              };
       assign hpdcache_req_abort_o = cva6_req_i.kill_req;
-      assign hpdcache_req_tag_o = cva6_req_i.address_tag;
+      assign hpdcache_req_tag_o = '0;
       assign hpdcache_req_pma_o.uncacheable = hpdcache_req_is_uncacheable;
       assign hpdcache_req_pma_o.io = 1'b0;
       assign hpdcache_req_pma_o.wr_policy_hint = hpdcache_pkg::HPDCACHE_WR_POLICY_AUTO;

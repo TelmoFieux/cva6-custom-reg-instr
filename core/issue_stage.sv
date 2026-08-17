@@ -565,6 +565,9 @@ module issue_stage
         .decoded_instr_o            (decoded_instr_o),
         .decoded_instr_valid_o      (decoded_instr_valid_o)
       );
+      //TODO: puisque j'ai enlevé fu_ready qui causait des boucle combinatoire, on peut se retrouver
+      //à selectionner une op pour une unité occupé non ? Même si en soit je pense que c'est plus
+      //trop un problème avec l'ajout de la lsq
       assign rs_results[i] = decoded_instr_o;
       assign rs_valid[i] = decoded_instr_valid_o;
       assign rs_full[i] = rs_full_o & we_i;

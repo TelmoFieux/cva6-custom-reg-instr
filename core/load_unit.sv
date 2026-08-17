@@ -33,6 +33,8 @@ module load_unit
     input logic rst_ni,
     // Flush signal - CONTROLLER
     input logic flush_i,
+    // Is ldbuf full - LOAD_STORE_QUEUE
+    output logic ldbuf_full_o,
     // do we need to rollback lsu buffer or squash load instr ? - SCOREBOARD
     input logic [CVA6Cfg.RollbackWidth-1:0] rollback_i,
     // trans if of instruction to rollback - SCOREBOARD
@@ -41,10 +43,14 @@ module load_unit
     input logic valid_i,
     // Load request input - LSU_BYPASS
     input lsu_ctrl_t lsu_ctrl_i,
+    // index of the load instr in the load queue - LOAD_UNIT
+    input logic [CVA6Cfg.NrLSQEntries-1:0] ld_unit_idx_i,
     // Pop the load request from the LSU bypass FIFO - LSU_BYPASS
     output logic pop_ld_o,
     // Load unit result is valid - ISSUE_STAGE
     output logic valid_o,
+    // index of the load instr that finished - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrLSQEntries-1:0] ld_unit_idx_o,
     // Load result - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.XLEN-1:0] result_o,
     // Physical address - LOAD_STORE_QUEUE
@@ -58,10 +64,7 @@ module load_unit
     IDLE,
     WAIT_GNT,
     SEND_TAG,
-    ABORT_TRANSACTION,
-    ABORT_TRANSACTION_NI,
-    WAIT_FLUSH,
-    WAIT_WB_EMPTY
+    WAIT_FLUSH
   }
       state_d, state_q;
 
@@ -69,7 +72,7 @@ module load_unit
   // we need a a buffer which can hold all inflight memory load requests
   typedef struct packed {
     logic [CVA6Cfg.TRANS_ID_BITS-1:0]    trans_id;        // scoreboard identifier
-    logic [CVA6Cfg.GlobalRsIdWidth-1:0]  global_id;
+    logic [CVA6Cfg.NrLSQEntries-1:0]     ldq_idx;         // load queue index
     logic [CVA6Cfg.XLEN_ALIGN_BYTES-1:0] address_offset;  // least significant bits of the address
     fu_op                                operation;       // type of load
   } ldbuf_t;
@@ -83,6 +86,13 @@ module load_unit
   localparam int unsigned REQ_ID_BITS = CVA6Cfg.NrLoadBufEntries > 1 ? $clog2(
       CVA6Cfg.NrLoadBufEntries
   ) : 1;
+
+  localparam logic USE_HPDCACHE =
+    CVA6Cfg.DCacheType inside {
+        config_pkg::HPDCACHE_WT,
+        config_pkg::HPDCACHE_WB,
+        config_pkg::HPDCACHE_WT_WB
+    };
 
   typedef logic [REQ_ID_BITS-1:0] ldbuf_id_t;
 
@@ -100,6 +110,7 @@ module load_unit
   ldbuf_id_t ldbuf_last_id_q;
 
   assign ldbuf_full = &ldbuf_valid_q;
+  assign ldbuf_full_o = ldbuf_full;
 
   //
   //  buffer of outstanding loads
@@ -172,12 +183,10 @@ module load_unit
   assign req_port_o.data_wdata = '0;
   // compose the load buffer write data, control is handled in the FSM
   assign ldbuf_wdata = {
-    lsu_ctrl_i.trans_id, lsu_ctrl_i.global_id, lsu_ctrl_i.vaddr[CVA6Cfg.XLEN_ALIGN_BYTES-1:0], lsu_ctrl_i.operation
+    lsu_ctrl_i.trans_id, ld_unit_idx_i, lsu_ctrl_i.vaddr[CVA6Cfg.XLEN_ALIGN_BYTES-1:0], lsu_ctrl_i.operation
   };
   // output address
-  // we can now output the lower 12 bit as the index to the cache
-  assign req_port_o.address_index = lsu_ctrl_i.vaddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:0];
-  // translation from last cycle, again: control is handled in the FSM
+  assign req_port_o.address_index = paddr_i[CVA6Cfg.DCACHE_INDEX_WIDTH-1:0];
   assign req_port_o.address_tag   = paddr_i[CVA6Cfg.DCACHE_TAG_WIDTH     +
                                               CVA6Cfg.DCACHE_INDEX_WIDTH-1 :
                                               CVA6Cfg.DCACHE_INDEX_WIDTH];
@@ -201,22 +210,41 @@ module load_unit
     // In IDLE and SEND_TAG states, this unit can accept a new load request
     // when the load buffer is not full or if there is a response and the
     // load buffer is in fall-through mode
+    accept_req = (valid_i && !flush_i && (!ldbuf_full || (LDBUF_FALLTHROUGH && ldbuf_r)));
+
+    for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_i[i] && rollback_trans_id_i[i] == lsu_ctrl_i.trans_id) begin
+        accept_req = 1'b0;
+      end
+    end
+
 
     case (state_q)
       IDLE: begin
+        if (accept_req) begin
+          if (req_port_i.data_gnt) begin
+            if (USE_HPDCACHE)
+              state_d = IDLE;
+            else
+              state_d = SEND_TAG;
+          end else begin
+            state_d = WAIT_GNT;
+          end
+        end
       end
 
       WAIT_GNT: begin
         // keep the request up
         req_port_o.data_req = 1'b1;
-        // we finally got a data grant
-        // otherwise we keep waiting on our grant
+        // when using hpd cache we can skip the send_tag step
+        if(req_port_i.data_gnt) begin
+          state_d = USE_HPDCACHE ? IDLE : SEND_TAG;
+        end
       end
       // we know for sure that the tag we want to send is valid
       SEND_TAG: begin
         req_port_o.tag_valid = 1'b1;
         state_d = IDLE;
-
       end
 
       WAIT_FLUSH: begin
@@ -229,21 +257,7 @@ module load_unit
       end
 
       default: begin
-        // abort the previous request - free the D$ arbiter
-        // we are here because of a TLB miss, we need to abort the current request and give way for the
-        // PTW walker to satisfy the TLB miss
-        if (state_q == ABORT_TRANSACTION && CVA6Cfg.MmuPresent) begin
-          req_port_o.kill_req = 1'b1;
-          req_port_o.tag_valid = 1'b1;
-          // wait until the WB is empty
-        end else if (state_q == ABORT_TRANSACTION_NI && CVA6Cfg.NonIdemPotenceEn) begin
-          req_port_o.kill_req = 1'b1;
-          req_port_o.tag_valid = 1'b1;
-          // re-do the request
-          state_d = WAIT_WB_EMPTY;
-        end else begin
-          state_d = IDLE;
-        end
+        state_d = IDLE;
       end
     endcase
 
@@ -255,8 +269,7 @@ module load_unit
             state_d = IDLE;
             req_port_o.data_req = 1'b0;
           end
-          SEND_TAG, ABORT_TRANSACTION, ABORT_TRANSACTION_NI,
-          WAIT_WB_EMPTY: begin
+          SEND_TAG : begin
             state_d = IDLE;
           end
           default: ;
@@ -265,13 +278,22 @@ module load_unit
     end
 
     // if we just flushed and the queue is not empty or we are getting an rvalid this cycle wait in a extra stage
-    if (flush_i) begin
+    // with hpdcache in OoO we can't cancel a load
+    if (flush_i && USE_HPDCACHE) begin
+      if (state_q == WAIT_GNT) begin
+        req_port_o.data_req = 1'b0;
+        state_d = IDLE;
+      end
+    end
+
+    if (flush_i && !USE_HPDCACHE) begin
       state_d = WAIT_FLUSH;
     end
   end
 
   // track the load data for later usage
   assign ldbuf_w = req_port_o.data_req & req_port_i.data_gnt;
+  assign pop_ld_o = ldbuf_w;
 
   // ---------------
   // Retire Load
@@ -284,6 +306,13 @@ module load_unit
     //  read the pending load buffer
     ldbuf_r    = req_port_i.data_rvalid;
     valid_o    = 1'b0;
+    ld_unit_idx_o = ldbuf_q[ldbuf_rindex].ldq_idx;
+
+    // we got an rvalid and it's corresponding request was not flushed
+    if (req_port_i.data_rvalid && !ldbuf_flushed_q[ldbuf_rindex]) begin
+      // if the response corresponds to the last request, check that we are not killing it
+      if ((ldbuf_last_id_q != ldbuf_rindex) || !req_port_o.kill_req) valid_o = 1'b1;
+    end
   end
 
 
