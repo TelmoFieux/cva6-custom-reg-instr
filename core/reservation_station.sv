@@ -69,6 +69,9 @@ module reservation_station
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
   } reservation_station_t;
 
+  //TODO: qu'est ce qui m'empêche de mettre en place un fall through dans le cas ou il n'y a qu'un
+  //seule instruction et qu'elle est valide on peut directement l'envoyer non ?
+
   logic [NUM_REG-1:0] is_result_available_gpr_n, is_result_available_gpr_q;
   //some operations might use gpr and fpr register as operands or destination
   logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
