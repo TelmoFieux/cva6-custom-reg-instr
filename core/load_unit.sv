@@ -44,13 +44,13 @@ module load_unit
     // Load request input - LSU_BYPASS
     input lsu_ctrl_t lsu_ctrl_i,
     // index of the load instr in the load queue - LOAD_UNIT
-    input logic [CVA6Cfg.NrLSQEntries-1:0] ld_unit_idx_i,
+    input logic [$clog2(CVA6Cfg.NrLSQEntries)-1:0] ld_unit_idx_i,
     // Pop the load request from the LSU bypass FIFO - LSU_BYPASS
     output logic pop_ld_o,
     // Load unit result is valid - ISSUE_STAGE
     output logic valid_o,
     // index of the load instr that finished - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrLSQEntries-1:0] ld_unit_idx_o,
+    output logic [$clog2(CVA6Cfg.NrLSQEntries)-1:0] ld_unit_idx_o,
     // Load result - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.XLEN-1:0] result_o,
     // Physical address - LOAD_STORE_QUEUE
@@ -58,7 +58,7 @@ module load_unit
     // Data cache request out - CACHES
     input dcache_req_o_t req_port_i,
     // Data cache request in - CACHES
-    output dcache_req_i_t req_port_o,
+    output dcache_req_i_t req_port_o
 );
   enum logic [3:0] {
     IDLE,
@@ -108,6 +108,7 @@ module load_unit
   ldbuf_t    ldbuf_rdata;
   ldbuf_id_t ldbuf_rindex;
   ldbuf_id_t ldbuf_last_id_q;
+  logic accept_req;
 
   assign ldbuf_full = &ldbuf_valid_q;
   assign ldbuf_full_o = ldbuf_full;

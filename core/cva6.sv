@@ -451,16 +451,14 @@ module cva6
   logic store_dispatched;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id;
 
-  logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0] st_we_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_id_ex,
-  logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_ex_id,
-  logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_id_ex;
+  logic [CVA6Cfg.NrIssuePorts-1:0] st_we_id_ex;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_id_ex;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_id_ex;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_id_ex;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_id_ex;
+  logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_ex_id;
+  logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_id_ex;
   fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_id_ex;
 
 
@@ -1733,8 +1731,8 @@ module cva6
       .we_fpr(we_fpr_commit_id),
       .commit_instr(commit_instr_id_commit),
       .commit_ack(commit_ack),
-      .st_valid(ex_stage_i.lsu_i.i_store_unit.store_buffer_i.valid_i),
-      .st_paddr(ex_stage_i.lsu_i.i_store_unit.store_buffer_i.paddr_i),
+      .st_valid(ex_stage_i.lsu_i.st_valid_i),
+      .st_paddr(ex_stage_i.lsu_i.st_lsq_paddr),
       .ld_valid(ex_stage_i.lsu_i.i_load_unit.req_port_o.tag_valid),
       .ld_kill(ex_stage_i.lsu_i.i_load_unit.req_port_o.kill_req),
       .ld_paddr(ex_stage_i.lsu_i.i_load_unit.paddr_i),

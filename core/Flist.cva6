@@ -135,6 +135,8 @@ ${CVA6_REPO_DIR}/core/ariane_regfile_fpga.sv
 ${CVA6_REPO_DIR}/core/scoreboard.sv
 ${CVA6_REPO_DIR}/core/register_allocation_table.sv
 ${CVA6_REPO_DIR}/core/reservation_station.sv
+${CVA6_REPO_DIR}/core/load_store_queue.sv
+${CVA6_REPO_DIR}/core/lsq_bypass.sv
 ${CVA6_REPO_DIR}/core/tournament_tree.sv
 ${CVA6_REPO_DIR}/core/store_buffer.sv
 ${CVA6_REPO_DIR}/core/amo_buffer.sv

@@ -104,7 +104,7 @@ module ex_stage
     // vaddr sent by issue stage is already valid - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_i,
     // Transformed trap instruction - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0][31:0]                    lsq_tinst_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][31:0]                    lsq_tinst_i,
     // LSQ is full - ISSUE_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_o,
     // Load result is valid - ISSUE_STAGE

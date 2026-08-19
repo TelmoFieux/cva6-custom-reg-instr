@@ -40,6 +40,8 @@ module issue_read_operands
     // Entry about the instruction to issue - SCOREBOARD
     input scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] issue_instr_i,
     input scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] issue_instr_i_prev,
+    // Entry received by issue stage this cycle - REGISTER_ALLOCATION_TABLE
+    input scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] lsq_instr_i,
     // Instruction to issue - SCOREBOARD
     input logic [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_i,
     // Is there an instruction to issue - SCOREBOARD
@@ -48,6 +50,8 @@ module issue_read_operands
     output logic [CVA6Cfg.NrIssuePorts-1:0] issue_ack_o,
     // FU data useful to execute instruction - EX_STAGE
     output fu_data_t [CVA6Cfg.NrIssuePorts-1:0] fu_data_o,
+    // FU data useful to execute instruction - LOAD_STORE_QUEUE
+    output fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_o,
     // Unregistered version of fu_data_o.operanda - EX_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.VLEN-1:0] rs1_forwarding_o,
     // Unregistered version of fu_data_o.operandb - EX_STAGE
@@ -66,6 +70,8 @@ module issue_read_operands
     output logic [CVA6Cfg.NrIssuePorts-1:0] branch_valid_o,
     // Transformed trap instruction - EX_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0][31:0] tinst_o,
+    // Transformed trap instruction - LOAD_STORE_QUEUE
+    output logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_o,
     // Information of branch prediction - EX_STAGE
     output branchpredict_sbe_t branch_predict_o,
     // Load store unit FU is ready - EX_STAGE
@@ -130,7 +136,16 @@ module issue_read_operands
 
 );
 
-  localparam OPERANDS_PER_INSTR = CVA6Cfg.NrRgprPorts / CVA6Cfg.NrIssuePorts;
+  localparam int unsigned LSQ_BASE = CVA6Cfg.NrRgprPorts;
+
+  localparam int unsigned ISSUE_GPR_PORTS = CVA6Cfg.NrRgprPorts;
+  localparam int unsigned LSQ_GPR_PORTS = 2 * CVA6Cfg.NrIssuePorts;
+  localparam int unsigned TOTAL_GPR_PORTS = ISSUE_GPR_PORTS + LSQ_GPR_PORTS;
+  localparam int unsigned OPERANDS_PER_INSTR = ISSUE_GPR_PORTS / CVA6Cfg.NrIssuePorts;
+
+  localparam int unsigned ISSUE_FPR_PORTS = 3;
+  localparam int unsigned LSQ_FPR_PORTS   = CVA6Cfg.NrIssuePorts;
+  localparam int unsigned TOTAL_FPR_PORTS = ISSUE_FPR_PORTS + LSQ_FPR_PORTS;
 
   typedef struct packed {
     logic none, load, store, alu, alu2, ctrl_flow, mult, csr, fpu, fpu_vec, cvxif, accel;
@@ -593,8 +608,9 @@ module issue_read_operands
   // ----------------------
   // Integer Register File
   // ----------------------
-  logic [  CVA6Cfg.NrRgprPorts-1:0][CVA6Cfg.XLEN-1:0] rdata;
-  logic [  CVA6Cfg.NrRgprPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] raddr_pack;
+
+  logic [TOTAL_GPR_PORTS-1:0][CVA6Cfg.XLEN-1:0] rdata;
+  logic [TOTAL_GPR_PORTS-1:0][CVA6Cfg.RegAddrWidth-1:0] raddr_pack;
 
   // pack signals
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_pack;
@@ -610,6 +626,12 @@ module issue_read_operands
     end
   end
 
+  // Does not work with CVA6Cfg.FpgaAlteraEn
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+    assign raddr_pack[LSQ_BASE + 2*i] = lsq_instr_i[i].rs1[CVA6Cfg.RegAddrWidth-1:0];
+    assign raddr_pack[LSQ_BASE + 2*i + 1] = lsq_instr_i[i].rs2[CVA6Cfg.RegAddrWidth-1:0];
+  end
+
   for (genvar i = 0; i < CVA6Cfg.NrWbPorts; i++) begin : gen_write_back_port
     assign waddr_pack[i] = waddr_i[i];
     assign wdata_pack[i] = csr_we_i && i == FLU_WB ? csr_rdata_i : wdata_i[i];
@@ -619,7 +641,7 @@ module issue_read_operands
     ariane_regfile_fpga #(
         .CVA6Cfg      (CVA6Cfg),
         .DATA_WIDTH   (CVA6Cfg.XLEN),
-        .NR_READ_PORTS(CVA6Cfg.NrRgprPorts),
+        .NR_READ_PORTS(TOTAL_GPR_PORTS),
         .ZERO_REG_ZERO(1),
         .ADDR_WIDTH   (CVA6Cfg.RegAddrWidth)
     ) i_ariane_regfile_fpga (
@@ -653,24 +675,39 @@ module issue_read_operands
   // -----------------------------
   // Floating-Point Register File
   // -----------------------------
-  logic [2:0][CVA6Cfg.FLen-1:0] fprdata;
+
+  logic [TOTAL_FPR_PORTS-1:0][CVA6Cfg.FLen-1:0] fprdata;
 
   // pack signals
-  logic [2:0][CVA6Cfg.RegAddrWidth-1:0] fp_raddr_pack;
+  logic [TOTAL_FPR_PORTS-1:0][CVA6Cfg.RegAddrWidth-1:0] fp_raddr_pack;
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] fp_wdata_pack;
 
   always_comb begin : assign_fp_raddr_pack
-    fp_raddr_pack = {
-      issue_instr_i[0].result[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[0].rs2[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[0].rs1[CVA6Cfg.RegAddrWidth-1:0]
+
+    fp_raddr_pack = '0;
+
+    fp_raddr_pack[ISSUE_FPR_PORTS-1:0] = {
+     issue_instr_i[0].result[CVA6Cfg.RegAddrWidth-1:0],
+      issue_instr_i[0].rs2[CVA6Cfg.RegAddrWidth-1:0],
+      issue_instr_i[0].rs1[CVA6Cfg.RegAddrWidth-1:0]
     };
 
     if (CVA6Cfg.SuperscalarEn) begin
       if (!(issue_instr_i[0].fu inside {FPU, FPU_VEC})) begin
-        fp_raddr_pack = {
-          issue_instr_i[1].result[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[1].rs2[CVA6Cfg.RegAddrWidth-1:0], issue_instr_i[1].rs1[CVA6Cfg.RegAddrWidth-1:0]
+        fp_raddr_pack[ISSUE_FPR_PORTS-1:0] = {
+          issue_instr_i[1].result[CVA6Cfg.RegAddrWidth-1:0],
+          issue_instr_i[1].rs2[CVA6Cfg.RegAddrWidth-1:0],
+          issue_instr_i[1].rs1[CVA6Cfg.RegAddrWidth-1:0]
         };
       end
     end
+
+    // FPR ports for LSQ
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      fp_raddr_pack[ISSUE_FPR_PORTS + i] =
+          lsq_instr_i[i].rs2[CVA6Cfg.RegAddrWidth-1:0];
+    end
+
   end
 
   generate
@@ -682,7 +719,7 @@ module issue_read_operands
         ariane_regfile_fpga #(
             .CVA6Cfg      (CVA6Cfg),
             .DATA_WIDTH   (CVA6Cfg.FLen),
-            .NR_READ_PORTS(3),
+            .NR_READ_PORTS(TOTAL_FPR_PORTS),
             .ZERO_REG_ZERO(0),
             .ADDR_WIDTH   (CVA6Cfg.RegAddrWidth)
         ) i_ariane_fp_regfile_fpga (
@@ -737,6 +774,42 @@ module issue_read_operands
     assign operand_c_regfile[i] = (OPERANDS_PER_INSTR == 3) ? ((CVA6Cfg.FpPresent && is_imm_fpr(
         issue_instr_i[i].op
     )) ? operand_c_fpr : operand_c_gpr[i]) : operand_c_fpr;
+  end
+
+
+  always_comb begin : lsq_fu_data
+
+    lsq_fu_data_o = '0;
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      lsq_tinst_o[i]= CVA6Cfg.RVH ? lsq_instr_i[i].ex.tinst : '0;
+
+      lsq_fu_data_o[i].operand_a = rdata[LSQ_BASE + 2*i];
+
+      if (CVA6Cfg.FpPresent && is_rs2_fpr(lsq_instr_i[i].op)) begin
+        lsq_fu_data_o[i].operand_b = {{CVA6Cfg.XLEN-CVA6Cfg.FLen{1'b0}}, fprdata[ISSUE_FPR_PORTS+i]};
+      end else begin
+        lsq_fu_data_o[i].operand_b = rdata[LSQ_BASE + 2*i + 1];
+      end
+
+      lsq_fu_data_o[i].operation = lsq_instr_i[i].op;
+      lsq_fu_data_o[i].fu = lsq_instr_i[i].fu;
+      lsq_fu_data_o[i].imm = lsq_instr_i[i].result;
+      lsq_fu_data_o[i].trans_id = lsq_instr_i[i].trans_id;
+      lsq_fu_data_o[i].global_id = lsq_instr_i[i].global_rs_id;
+
+      for (int k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
+        if (we_gpr_i[k] && waddr_i[k] == lsq_instr_i[i].rs1 && lsq_instr_i[i].rs1 != '0)
+          lsq_fu_data_o[i].operand_a = wdata_i[k];
+
+        if (CVA6Cfg.FpPresent && is_rs2_fpr(lsq_instr_i[i].op)) begin
+          if (we_fpr_i[k] && waddr_i[k] == lsq_instr_i[i].rs2)
+            lsq_fu_data_o[i].operand_b = wdata_i[k];
+        end else begin
+          if (we_gpr_i[k] && waddr_i[k] == lsq_instr_i[i].rs2 && lsq_instr_i[i].rs2 != '0)
+            lsq_fu_data_o[i].operand_b = wdata_i[k];
+        end
+      end
+    end
   end
 
   // ----------------------

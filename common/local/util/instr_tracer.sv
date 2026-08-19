@@ -53,21 +53,7 @@ module instr_tracer #(
   input logic[CVA6Cfg.XLEN-1:0] hart_id_i
 );
 
-  // =========================================================================
-  // AJOUT : Création des alias de types paramétrés pour résoudre l'erreur vopt
-  // =========================================================================
-  typedef instr_trace_item #(
-    .CVA6Cfg(CVA6Cfg),
-    .bp_resolve_t(bp_resolve_t),
-    .scoreboard_entry_t(scoreboard_entry_t)
-  ) iti_t;
 
-  typedef ex_trace_item #(
-    .CVA6Cfg(CVA6Cfg),
-    .interrupts_t(interrupts_t),
-    .INTERRUPTS(INTERRUPTS)
-  ) eti_t;
-  // =========================================================================
 
   // keep the decoded instructions in a queue
   logic [31:0] decode_queue [$];
@@ -233,35 +219,83 @@ module instr_tracer #(
     bp              = {};
   endfunction
 
-  function automatic void printInstr(scoreboard_entry_t sbe, logic [31:0] instr, logic [63:0] result, logic [CVA6Cfg.PLEN-1:0] paddr, riscv::priv_lvl_t priv_lvl, logic debug_mode, bp_resolve_t bp);
-    // 1. Toutes les déclarations de variables impérativement en haut
-    iti_t iti;
+  function automatic void printInstr(
+      scoreboard_entry_t sbe,
+      logic [31:0] instr,
+      logic [63:0] result,
+      logic [CVA6Cfg.PLEN-1:0] paddr,
+      riscv::priv_lvl_t priv_lvl,
+      logic debug_mode,
+      bp_resolve_t bp
+  );
+
+    instr_trace_item #(
+      .CVA6Cfg(CVA6Cfg),
+      .bp_resolve_t(bp_resolve_t),
+      .scoreboard_entry_t(scoreboard_entry_t)
+    ) iti;
+
     string print_instr;
 
-    // 2. Code exécutable et affectations ensuite
-    iti = new ($time, clk_ticks, sbe, instr, gp_reg_file, fp_reg_file, result, paddr, priv_lvl, debug_mode, bp);
-    // print instruction to console
+    iti = new(
+      $time,
+      clk_ticks,
+      sbe,
+      instr,
+      gp_reg_file,
+      fp_reg_file,
+      result,
+      paddr,
+      priv_lvl,
+      debug_mode,
+      bp
+    );
+
     print_instr = iti.printInstr();
+
     if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && !debug_mode) begin
-      $fwrite(commit_log, riscv::spikeCommitLog(sbe.pc, priv_lvl, instr, sbe.rd, result, ariane_pkg::is_rd_fpr(sbe.op)));
+      $fwrite(
+        commit_log,
+        riscv::spikeCommitLog(
+          sbe.pc,
+          priv_lvl,
+          instr,
+          sbe.rd,
+          result,
+          ariane_pkg::is_rd_fpr(sbe.op)
+        )
+      );
     end
+
     $fwrite(f, {print_instr, "\n"});
   endfunction
 
-  function automatic void printException(logic [CVA6Cfg.VLEN-1:0] pc, logic [63:0] cause, logic [63:0] tval);
-    // 1. Toutes les déclarations de variables impérativement en haut
-    eti_t eti;
-    string print_ex;
+  function automatic void printException(
+        logic [CVA6Cfg.VLEN-1:0] pc,
+        logic [63:0] cause,
+        logic [63:0] tval
+    );
 
-    // 2. Code exécutable et affectations ensuite
-    eti = new (pc, cause, tval);
-    print_ex = eti.printException();
-    $fwrite(f, {print_ex, "\n"});
+      ex_trace_item #(
+        .CVA6Cfg(CVA6Cfg),
+        .interrupts_t(interrupts_t),
+        .INTERRUPTS(INTERRUPTS)
+      ) eti;
+
+      string print_ex;
+
+      eti = new(pc, cause, tval);
+      print_ex = eti.printException();
+
+      $fwrite(f, {print_ex, "\n"});
   endfunction
 
   function void close();
-    if (f) $fclose(f);
-    if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && commit_log) $fclose(commit_log);
+    if (f)
+      $fclose(f);
+
+    if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && commit_log)
+      $fclose(commit_log);
   endfunction
 
 

@@ -37,7 +37,7 @@ module store_unit
     // Data input - ISSUE_STAGE
     input lsu_ctrl_t lsu_ctrl_i,
     // Physical address - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.PLEN-1:0] paddr_i
+    input logic [CVA6Cfg.PLEN-1:0] paddr_i,
     // Instruction commit - TO_BE_COMPLETED
     input logic commit_i,
     // is store ready to commit - LOAD_STORE_QUEUE
@@ -151,7 +151,6 @@ module store_unit
       .flush_i,
       .stall_st_pending_i,
       .no_st_pending_o,
-      .page_offset_i,
       .commit_i,
       .store_buffer_valid_i (store_buffer_valid),
       .commit_ready_o,

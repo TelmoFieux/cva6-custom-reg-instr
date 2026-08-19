@@ -221,7 +221,6 @@ module load_store_unit
 
 
 
-  logic                                     ldbuf_full_i;
   logic                                     st_sent_to_cache;
   logic [CVA6Cfg.VLEN-1:0] mmu_vaddr;
   logic [CVA6Cfg.PLEN-1:0] mmu_paddr, lsu_paddr, st_lsq_paddr, ld_lsq_paddr;
@@ -469,7 +468,7 @@ module load_store_unit
 
       // to memory arbiter
       .req_port_i           (dcache_req_ports_i[1]),
-      .req_port_o           (dcache_req_ports_o[1]),
+      .req_port_o           (dcache_req_ports_o[1])
   );
 
   // ----------------------------
@@ -669,80 +668,81 @@ module load_store_unit
       .CVA6Cfg(CVA6Cfg),
       .lsu_ctrl_t(lsu_ctrl_t),
       .fu_data_t(fu_data_t),
+      .exception_t(exception_t),
       .LSQ_DEPTH(CVA6Cfg.NrLSQEntries)
   ) load_store_queue_i (
-    clk_i,
-    rst_ni,
-    flush_i,
-    full_o (lsq_full_o),
-    commit_i, //commit latest store
-    commit_trans_id_i (commit_tran_id_i),
-    dcache_wbuffer_not_ni_i (dcache_wbuffer_not_ni_i),
+    .clk_i,
+    .rst_ni,
+    .flush_i,
+    .full_o (lsq_full_o),
+    .commit_i, //commit latest store
+    .commit_trans_id_i (commit_tran_id_i),
+    .dcache_wbuffer_not_ni_i (dcache_wbuffer_not_ni_i),
 
-    rollback_i (lsu_rollback_i),
-    rollback_trans_id_i (lsu_rollback_trans_id_i),
-    store_dispatched_id_o,
+    .rollback_i (lsu_rollback_i),
+    .rollback_trans_id_i (lsu_rollback_trans_id_i),
+    .store_dispatched_id_o,
     // TODO: je pense que store_dispatched_o n'est plus nécessaire dans ce design
     //Je le laisse la pour le moment as a reminder qu'il faut modifier son calcule dans le scoreboard
 
     //LSQ write data
-    ld_we_i               (ld_we_i),
-    st_we_i               (st_we_i),
-    fu_data_i             (fu_data_i),
-    tinst_i               (tinst_i),
-    decoded_instr_valid_i (decoded_instr_valid_i),
-    decoded_instr_ack_i   (decoded_instr_ack_i),
-    data_trans_id_i       (data_trans_id_i),
-    vaddr_trans_id_i      (vaddr_trans_id_i),
-    st_data_valid_i       (st_data_valid_i),
-    vaddr_valid_i         (vaddr_valid_i),
+    .ld_we_i               (ld_we_i),
+    .st_we_i               (st_we_i),
+    .fu_data_i             (fu_data_i),
+    .tinst_i               (tinst_i),
+    .decoded_instr_valid_i (decoded_instr_valid_i),
+    .decoded_instr_ack_i   (decoded_instr_ack_i),
+    .data_trans_id_i       (data_trans_id_i),
+    .vaddr_trans_id_i      (vaddr_trans_id_i),
+    .st_data_valid_i       (st_data_valid_i),
+    .vaddr_valid_i         (vaddr_valid_i),
 
     //MMU
-    lsu_ctrl_o            (lsu_ctrl),
-    vaddr_o               (lsq_vaddr),
-    tinst_o               (lsq_tinst),
-    hs_ld_st_inst_o       (lsq_hs_ld_st_inst),
-    hlvx_inst_o           (lsq_hlvx_inst),
-    translation_req_o     (lsq_translation_req),
-    paddr_i               (mmu_paddr),
-    ex_i                  (mmu_exception),
-    dtlb_hit_i            (dtlb_hit),
-    dtlb_ppn_i            (dtlb_ppn),
+    .lsu_ctrl_o            (lsu_ctrl),
+    .vaddr_o               (lsq_vaddr),
+    .tinst_o               (lsq_tinst),
+    .hs_ld_st_inst_o       (lsq_hs_ld_st_inst),
+    .hlvx_inst_o           (lsq_hlvx_inst),
+    .translation_req_o     (lsq_translation_req),
+    .paddr_i               (mmu_paddr),
+    .ex_i                  (mmu_exception),
+    .dtlb_hit_i            (dtlb_hit),
+    .dtlb_ppn_i            (dtlb_ppn),
 
     //Write back info
-    wb_trans_id_i         (wb_trans_id_i),
-    wbdata_i              (wbdata_i),
-    wt_valid_i            (wt_valid_i),
+    .wb_trans_id_i         (wb_trans_id_i),
+    .wbdata_i              (wbdata_i),
+    .wt_valid_i            (wt_valid_i),
 
     //Store unit
-    st_buf_lsu_ctrl_o   (st_lsq_ctrl),
-    st_buf_valid_o      (st_valid_i),
-    st_buf_paddr_o      (st_lsq_paddr),
-    st_sent_to_cache_i  (st_sent_to_cache),
+    .st_buf_lsu_ctrl_o   (st_lsq_ctrl),
+    .st_buf_valid_o      (st_valid_i),
+    .st_buf_paddr_o      (st_lsq_paddr),
+    .st_sent_to_cache_i  (st_sent_to_cache),
 
     //Load unit
-    ldbuf_full_i       (ldbuf_full),
-    ld_pop_i           (pop_ld),
-    ld_unit_lsu_ctrl_o (ld_lsq_ctrl),
-    ld_unit_valid_o    (ld_valid_i),
-    ld_unit_paddr_o    (ld_lsq_paddr),
-    ld_unit_idx_o      (ld_lsq_idx_i),
-    ld_result_valid_i  (ld_lsq_result_valid),
-    ld_result_i        (ld_lsq_result),
-    ld_unit_idx_i      (ld_lsq_idx_o),
+    .ldbuf_full_i       (ldbuf_full),
+    .ld_pop_i           (pop_ld),
+    .ld_unit_lsu_ctrl_o (ld_lsq_ctrl),
+    .ld_unit_valid_o    (ld_valid_i),
+    .ld_unit_paddr_o    (ld_lsq_paddr),
+    .ld_unit_idx_o      (ld_lsq_idx_i),
+    .ld_result_valid_i  (ld_lsq_result_valid),
+    .ld_result_i        (ld_lsq_result),
+    .ld_unit_idx_i      (ld_lsq_idx_o),
 
     //Load write back
-    ld_valid_o           (ld_valid),
-    ld_trans_id_o        (ld_trans_id),
-    ld_global_id_o       (ld_global_id),
-    ld_result_o          (ld_result),
-    ld_ex_o              (ld_ex),
+    .ld_valid_o           (ld_valid),
+    .ld_trans_id_o        (ld_trans_id),
+    .ld_global_id_o       (ld_global_id),
+    .ld_result_o          (ld_result),
+    .ld_ex_o              (ld_ex),
 
     //Store write back
-    st_valid_o           (st_valid),
-    st_trans_id_o        (st_trans_id),
-    st_result_o          (st_result),
-    st_ex_o              (st_ex)
+    .st_valid_o           (st_valid),
+    .st_trans_id_o        (st_trans_id),
+    .st_result_o          (st_result),
+    .st_ex_o              (st_ex)
   );
 
   assign rvfi_lsu_ctrl_o = lsu_ctrl;

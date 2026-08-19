@@ -92,6 +92,11 @@ module scoreboard
     output logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o,
     // we enable for fpr register - ISSUE_READ_OPERANDS
     output logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o,
+        // trans id of the producer needed by a store - LOAD_STORE_QUEUE
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_o,
+    // trans id of the producer needed by a store or load - LOAD_STORE_QUEUE
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_o,
+
 
 
     // Issue pointer - RVFI
@@ -212,6 +217,27 @@ module scoreboard
     orig_instr_o  = orig_instr_i;
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       issue_instr_valid_o[i]    = decoded_instr_valid_i[i] & ~issue_full[i] & (state_q == NORMAL);
+    end
+  end
+
+  always_comb begin : lsq_info
+    for (int unsigned i = 0; i < CVA6Cfg.NR_SB_ENTRIES ; i++) begin
+      if (mem_q[i].issued & mem_q[i].sbe.rd == decoded_instr_i[i].rs1) begin
+        vaddr_trans_id_o[i] = mem_q[i].sbe.trans_id;
+      end
+      if (mem_q[i].issued & mem_q[i].sbe.rd == decoded_instr_i[i].rs2) begin
+        data_trans_id_o[i] = mem_q[i].sbe.trans_id;
+      end
+    end
+
+    for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts ; i++) begin
+      if (decoded_instr_valid_i[i-1] & decoded_instr_i[i-1].rd == decoded_instr_i[i].rs1) begin
+        vaddr_trans_id_o = decoded_instr_i[i-1].trans_id;
+      end
+
+      if (decoded_instr_valid_i[i-1] & decoded_instr_i[i-1].rd == decoded_instr_i[i].rs2) begin
+        data_trans_id_o = decoded_instr_i[i-1].trans_id;
+      end
     end
   end
 

@@ -78,21 +78,21 @@ module issue_stage
     input logic resolve_branch_i,
 
     // FU data sent directly to lsq - LOAD_STORE_QUEUE
-    input fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_o,
+    output fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_o,
     // Instr to write to the load queue - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_o,
     // Instr to write to the store queue - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0] st_we_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0] st_we_o,
     // trans id of the producer needed by a store - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_o,
     // trans id of the producer needed by a store or load - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_o,
     // data sent by issue stage is already valid - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_o,
     // vaddr sent by issue stage is already valid - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_o,
     // LSQ is full - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_i,
     // Transformed trap instruction - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_o,
 
@@ -462,6 +462,7 @@ module issue_stage
   // ---------------------------------------------------------
 
   localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
+
   logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
   fu_op                               wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
@@ -481,6 +482,7 @@ module issue_stage
     localparam logic is_rs_instanciated =
         (fu == FPU_ALU2) ? (CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent) :
         (fu == F_CVXIF)  ? CVA6Cfg.CvxifEn :
+        (fu == LOAD_STORE) ? 1'b0 : // not instanciated when LSQ is used
         1'b1;
 
     if (is_rs_instanciated) begin : rs_instance
@@ -670,11 +672,11 @@ module issue_stage
   always_comb begin : instr_ack_update
     //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
     decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ?
-        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0]) ? 1'b0 :
+        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || ((ld_we_o[0] | st_we_o[0]) & lsq_full_i[0])) ? 1'b0 :
       (issue_instr_ack[0] && !final_rs_full[0])) : 1'b0;
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
       decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ?
-          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i]) ? 1'b0 :
+          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || ((ld_we_o[i] | st_we_o[i]) & lsq_full_i[i])) ? 1'b0 :
         (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1])) : 1'b0;
     end
   end
@@ -688,7 +690,40 @@ module issue_stage
   end
 
   // ---------------------------------------------------------
-  // 2. Manage instructions in a scoreboard
+  // 3. Manage Load Store Queue signals
+  // ---------------------------------------------------------
+
+  for (genvar i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin : lsq_write_enable
+    assign ld_we_o[i] = decoded_instr_i[i].fu == LOAD;
+    assign st_we_o[i] = decoded_instr_i[i].fu == STORE;
+  end
+
+  lsq_bypass #(
+    .CVA6Cfg            (CVA6Cfg),
+    .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
+    .FPR_ENABLED        (CVA6Cfg.FpPresent),
+    .scoreboard_entry_t (scoreboard_entry_t)
+  ) i_lsq_bypass (
+    .clk_i                      (clk_i),
+    .rst_ni                     (rst_ni),
+    .rm_i                       (rm_i),
+    .rm_op_i                    (rm_op_i),
+    .rm_rd_i                    (rm_rd_i),
+    .wb_valid_i                 (wb_valid_o),
+    .wb_rd_i                    (wbaddr_o),
+    .wb_op_i                    (wb_op_o),
+    .rollback_en_i              (rollback_we_i),
+    .rollback_op_i              (rollback_op_i),
+    .rollback_rd_i              (rollback_rd_i),
+    .rs_restore_en_i            (flush_i),
+    .st_data_valid_o            (st_data_valid_o),
+    .vaddr_valid_o              (vaddr_valid_o),
+    .decoded_instr_i            (renamed_instr_i),
+    .decoded_instr_ack_i        (decoded_instr_ack_o)
+  );
+
+  // ---------------------------------------------------------
+  // 4. Manage instructions in a scoreboard
   // ---------------------------------------------------------
   scoreboard #(
       .CVA6Cfg   (CVA6Cfg),
@@ -712,6 +747,8 @@ module issue_stage
       .commit_drop_o,
       .commit_ack_i,
       .decoded_instr_i         (renamed_instr_i),
+      .data_trans_id_o         (data_trans_id_o),
+      .vaddr_trans_id_o        (vaddr_trans_id_o),
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
       .decoded_instr_ack_i     (decoded_instr_ack_o),
@@ -771,11 +808,13 @@ module issue_stage
       .flush_i                 (flush_unissued_instr_i),
       .stall_i,
       .issue_instr_i           (issue_instr_sb_iro),
+      .lsq_instr_i             (renamed_instr_i),
       .issue_instr_i_prev      (decoded_instr_i_prev),
       .orig_instr_i            (orig_instr_sb_iro),
       .issue_instr_valid_i     (issue_instr_valid_sb_iro),
       .issue_ack_o             (issue_ack_iro_sb),
       .fu_data_o               (fu_data_o),
+      .lsq_fu_data_o           (lsq_fu_data_o),
       .rs1_forwarding_o        (rs1_forwarding_o),
       .rs2_forwarding_o        (rs2_forwarding_o),
       .pc_o,
@@ -785,6 +824,7 @@ module issue_stage
       .alu_valid_o             (alu_valid_o),
       .branch_valid_o          (branch_valid_o),
       .tinst_o                 (tinst_o),
+      .lsq_tinst_o             (lsq_tinst_o),
       .branch_predict_o,
       .lsu_ready_i,
       .lsu_valid_o,
