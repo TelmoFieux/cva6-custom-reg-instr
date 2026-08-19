@@ -18,7 +18,6 @@ module load_store_queue
   import ariane_pkg::*;
 #(
     parameter config_pkg::cva6_cfg_t CVA6Cfg       = config_pkg::cva6_cfg_empty,
-    parameter int unsigned           ADDR_WIDTH    = 32,
     parameter int unsigned           LSQ_DEPTH     = 4,
     parameter type fu_data_t = logic,
     parameter type lsu_ctrl_t = logic
@@ -53,10 +52,10 @@ module load_store_queue
     input logic [CVA6Cfg.NrIssuePorts-1:0]                            decoded_instr_valid_i,
     // Handshake with decode stage - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0]                            decoded_instr_ack_i,
-    // Register adress of the store data - ISSUE_STAGE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0]  data_reg_addr_i,
-    // Register adress of the adress for load and stores - ISSUE_STAGE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0]  vaddr_reg_addr_i,
+    // dest reg of the vaddr needed by a store - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]  data_trans_id_i,
+    // dest reg of the vaddr needed by a store or a load - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]  vaddr_trans_id_i,
     // Store data valid - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0]                            st_data_valid_i,
     // Adress of the load or store valid - ISSUE_STAGE
@@ -86,11 +85,11 @@ module load_store_queue
 
 
     // Destination register in register file - EX_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
+    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wb_trans_id_i,
     // Results to write back - EX_STAGE
-    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata_i,
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0]             wbdata_i,
     // Indicates valid results - EX_STAGE
-    input logic [CVA6Cfg.NrWbPorts-1:0] wt_valid_i,
+    input logic [CVA6Cfg.NrWbPorts-1:0]                               wt_valid_i,
 
 
 
@@ -168,9 +167,9 @@ module load_store_queue
     lsu_ctrl_t instr [LSQ_DEPTH-1:0];
     logic [LSQ_DEPTH-1:0] ready; // data and paddr are valid
     logic [LSQ_DEPTH-1:0] reserved; // instr has been accepted by the rob
-    logic [LSQ_DEPTH-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_reg_addr;
+    logic [LSQ_DEPTH-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id;
     logic [LSQ_DEPTH-1:0] vaddr_valid; // vaddr is valid
-    logic [LSQ_DEPTH-1:0][CVA6Cfg.RegAddrWidth-1:0] data_reg_addr;
+    logic [LSQ_DEPTH-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id;
     logic [LSQ_DEPTH-1:0] data_valid; // vaddr is valid
     logic [LSQ_DEPTH-1:0][CVA6Cfg.PLEN-1:0] paddr;
     logic [LSQ_DEPTH-1:0] paddr_valid; // vaddr has been translated
@@ -182,7 +181,7 @@ module load_store_queue
     lsu_ctrl_t instr [LSQ_DEPTH-1:0];
     logic [LSQ_DEPTH-1:0] ready; // data and paddr are valid
     logic [LSQ_DEPTH-1:0] reserved; // instr has been accepted by the rob
-    logic [LSQ_DEPTH-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_reg_addr;
+    logic [LSQ_DEPTH-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id;
     logic [LSQ_DEPTH-1:0] vaddr_valid; // vaddr is valid
     logic [LSQ_DEPTH-1:0][CVA6Cfg.PLEN-1:0] paddr;
     logic [LSQ_DEPTH-1:0] paddr_valid; // vaddr has been translated
@@ -356,7 +355,7 @@ module load_store_queue
         ld_queue_n.reserved = ld_free_entries_masked[i+1];
         ld_queue_n.instr[ld_alloc_idx[i]] = decoded_req[i];
         ld_queue_n.ready[ld_alloc_idx[i]] = '0;
-        ld_queue_n.vaddr_reg_addr[ld_alloc_idx[i]] = vaddr_reg_addr_i[i];
+        ld_queue_n.vaddr_trans_id[ld_alloc_idx[i]] = vaddr_trans_id_i[i];
         ld_queue_n.vaddr_valid[ld_alloc_idx[i]] = vaddr_is_valid[i];
         ld_queue_n.result[ld_alloc_idx[i]] = fu_data_i[i].imm;
       end
@@ -374,8 +373,8 @@ module load_store_queue
         st_queue_n.result[st_issue_pointer] = fu_data_i[i].imm;
         st_queue_n.data_valid[st_issue_pointer] = data_is_valid[i];
         st_queue_n.vaddr_valid[st_issue_pointer] = vaddr_is_valid[i];
-        st_queue_n.vaddr_reg_addr[st_issue_pointer] = vaddr_reg_addr_i[i];
-        st_queue_n.data_reg_addr[st_issue_pointer] = data_reg_addr_i[i];
+        st_queue_n.vaddr_trans_id[st_issue_pointer] = vaddr_trans_id_i[i];
+        st_queue_n.data_trans_id[st_issue_pointer] = data_trans_id_i[i];
         st_issue_pointer = st_issue_pointer + 1'b1;
       end
     end
@@ -408,7 +407,7 @@ module load_store_queue
 
     for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
       for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
-        if (wt_valid_i[j] && waddr_i[j] == st_queue_q.data_reg_addr[i]) begin
+        if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.data_trans_id[i]) begin
           data_snooped_valid[i] = 1'b1;
           data_snooped[i] = wbdata_i[j];
           st_queue_n.instr[i].data = wbdata_i[j];
@@ -470,8 +469,6 @@ module load_store_queue
     // ---------------
 
     ld_unit_ready = '0;
-
-    automatic logic [LSQ_DEPTH-1:0] is_ld_ready;
 
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
       if(st_paddr_valid[i] && data_valid[i] && st_queue_q.reserved[i]) begin
@@ -621,7 +618,7 @@ module load_store_queue
         vaddr_is_valid[i] = 1'b1;
       end else begin
         for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
-          if (wt_valid_i[j] && waddr_i[j] == vaddr_reg_addr_i[i]) begin
+          if (wt_valid_i[j] && wb_trans_id_i[j] == vaddr_trans_id_i[i]) begin
             vaddr_xlen[i] = $unsigned($signed(fu_data_i[i].imm) + $signed(wbdata_i[j]));
             vaddr_is_valid[i] = 1'b1;
           end
@@ -632,7 +629,7 @@ module load_store_queue
         st_data[i] = fu_data_i[i].operand_b;
       end else begin
         for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
-          if (wt_valid_i[j] && waddr_i[j] == data_reg_addr_i[i]) begin
+          if (wt_valid_i[j] && wb_trans_id_i[j] == data_trans_id_i[i]) begin
             data_is_valid[i] = 1'b1;
             st_data[i] = wbdata_i[j];
           end
@@ -707,7 +704,7 @@ module load_store_queue
     // Snooping CDB in case we are missing some data
     for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
       for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
-        if (wt_valid_i[j] && waddr_i[j] == st_queue_q.vaddr_reg_addr[i]) begin
+        if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.vaddr_trans_id[i]) begin
           st_snooped_vaddr_xlen[i] = $unsigned($signed(st_queue_q.result[i]) + $signed(wbdata_i[j]));
           st_snooped_we[i] = 1'b1;
           st_snooped_vaddr[i] = snooped_vaddr_xlen[i][CVA6Cfg.VLEN-1:0];
@@ -724,7 +721,7 @@ module load_store_queue
             st_snooped_be[i] = be_gen_32(st_snooped_vaddr[i][1:0], extract_transfer_size(st_queue_q.instr[i].operation));
           end
 
-        if (wt_valid_i[j] && waddr_i[j] == ld_queue_q.vaddr_reg_addr[i]) begin
+        if (wt_valid_i[j] && wb_trans_id_i[j] == ld_queue_q.vaddr_trans_id[i]) begin
           ld_snooped_vaddr_xlen[i] = $unsigned($signed(ld_queue_q.result[i]) + $signed(wbdata_i[j]));
           ld_snooped_we[i] = 1'b1;
           ld_snooped_vaddr[i] = snooped_vaddr_xlen[i][CVA6Cfg.VLEN-1:0];
@@ -1252,16 +1249,6 @@ module load_store_queue
     end
 
   end
-
-
-  //TODO: pour le rollback et le flush il faut effacer les entré nécessaire mais aussi :
-  //garantir que les requette mmu seront ignorée, bloquer l'acceptation de requete dans la lsq et
-  //jsp frr je suis fatigué mais faut faire attention à ce genre de truc
-
-  // Rollback
-
-  // Flush
-
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin

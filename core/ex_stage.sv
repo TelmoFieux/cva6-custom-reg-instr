@@ -49,6 +49,8 @@ module ex_stage
     input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.VLEN-1:0] rs2_forwarding_i,
     // FU data useful to execute instruction - ISSUE_STAGE
     input fu_data_t [CVA6Cfg.NrIssuePorts-1:0] fu_data_i,
+    // FU data sent directly to lsq - ISSUE_STAGE
+    input fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_i,
     // PC of the current instruction - ISSUE_STAGE
     input logic [CVA6Cfg.VLEN-1:0] pc_i,
     // Is_zcmt instruction - ISSUE_STAGE
@@ -85,10 +87,26 @@ module ex_stage
     input logic csr_commit_i,
     // MULT instruction is valid - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] mult_valid_i,
-    // LSU is ready - ISSUE_STAGE
-    output logic lsu_ready_o,
-    // LSU instruction is valid - ISSUE_STAGE
-    input logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_i,
+    // instruction is valid - ISSUe_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_i,
+    // Handshake between issue and decode stage - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
+    // Instr to write to the load queue - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_i,
+    // Instr to write to the store queue - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0] st_we_i,
+    // trans id of the producer needed by a store - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_i,
+    // trans id of the producer needed by a store or load - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_i,
+    // data sent by issue stage is already valid - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_i,
+    // vaddr sent by issue stage is already valid - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_i,
+    // Transformed trap instruction - LOAD_STORE_QUEUE
+    output logic [CVA6Cfg.NrIssuePorts-1:0][31:0]                    lsq_tinst_i,
+    // LSQ is full - ISSUE_STAGE
+    output logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_o,
     // Load result is valid - ISSUE_STAGE
     output logic load_valid_o,
     // Load result valid - ISSUE_STAGE
@@ -523,19 +541,35 @@ module ex_stage
   // ----------------
   // Load-Store Unit
   // ----------------
-  fu_data_t lsu_data;
-  logic [31:0] lsu_tinst;
-  always_comb begin
-    lsu_data  = lsu_valid_i[0] ? fu_data_i[0] : '0;
-    lsu_tinst = tinst_i[0];
 
-    if (CVA6Cfg.SuperscalarEn) begin
-      if (lsu_valid_i[1]) begin
-        lsu_data  = fu_data_i[1];
-        lsu_tinst = tinst_i[1];
-      end
-    end
+
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] wb_trans_id;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata;
+  logic [CVA6Cfg.NrWbPorts-1:0] wt_valid;
+
+  //assembling wb_data just like in the cva6 file
+  assign wb_trans_id[FLU_WB] = flu_trans_id_o;
+  assign wbdata[FLU_WB]   = flu_result_o;
+  assign wt_valid[FLU_WB] = flu_valid_o;
+
+  assign wb_trans_id[STORE_WB] = store_trans_id_o;
+  assign wbdata[STORE_WB]   = store_result_o;
+  assign wt_valid[STORE_WB] = store_valid_o;
+
+  assign wb_trans_id[LOAD_WB] = load_trans_id_o;
+  assign wbdata[LOAD_WB]   = load_result_o;
+  assign wt_valid[LOAD_WB] = load_valid_o;
+
+  assign wb_trans_id[FPU_WB] = fpu_trans_id_o;
+  assign wbdata[FPU_WB]   = fpu_result_o;
+  assign wt_valid[FPU_WB] = fpu_valid_o;
+
+  if (CVA6Cfg.CvxifEn) begin
+    assign wb_trans_id[X_WB] = x_trans_id_o;
+    assign wbdata[X_WB]   = x_result_o;
+    assign wt_valid[X_WB] = x_valid_o;
   end
+
 
   load_store_unit #(
       .CVA6Cfg   (CVA6Cfg),
@@ -554,9 +588,20 @@ module ex_stage
       .flush_i,
       .stall_st_pending_i,
       .no_st_pending_o,
-      .fu_data_i             (lsu_data),
-      .lsu_ready_o,
-      .lsu_valid_i           (|lsu_valid_i),
+      .fu_data_i               (lsq_fu_data_i),
+      .lsq_full_o,
+      .decoded_instr_valid_i,
+      .decoded_instr_ack_i,
+      .ld_we_i,
+      .st_we_i,
+      .data_trans_id_i,
+      .vaddr_trans_id_i,
+      .st_data_valid_i,
+      .vaddr_valid_i,
+      .wb_trans_id_i      (wb_trans_id),
+      .wbdata_i           (wbdata),
+      .wt_valid_i         (wt_valid),
+
       .lsu_rollback_i          (rollback_i),
       .lsu_rollback_trans_id_i (rollback_trans_id_i),
       .load_trans_id_o,
@@ -612,7 +657,7 @@ module ex_stage
       .amo_valid_commit_i,
       .amo_req_o,
       .amo_resp_i,
-      .tinst_i               (lsu_tinst),
+      .tinst_i               (lsq_tinst_i),
       .pmpcfg_i,
       .pmpaddr_i,
       .rvfi_lsu_ctrl_o,

@@ -445,13 +445,24 @@ module cva6
   branchpredict_sbe_t branch_predict_id_ex;
   logic resolve_branch_ex_id;
   // LSU
-  logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_id_ex;
-  logic lsu_ready_ex_id;
   logic [CVA6Cfg.RollbackWidth-1:0] rollback_store_buffer;
   logic [CVA6Cfg.RollbackWidth-1:0] rollback_ex;
   logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id;
   logic store_dispatched;
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id;
+
+  logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0] st_we_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_id_ex,
+  logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_ex_id,
+  logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_id_ex,
+  fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_id_ex;
+
 
 
   logic [CVA6Cfg.TRANS_ID_BITS-1:0] load_trans_id_ex_id;
@@ -540,7 +551,6 @@ module cva6
   // COMMIT <-> ID
   // --------------
 
-  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_commit_id;
   logic [CVA6Cfg.RegAddrWidth-1:0] commit_csr_waddr_o;
   logic [CVA6Cfg.XLEN-1:0] commit_csr_rdata_o;
   logic commit_csr_we_o;
@@ -880,8 +890,15 @@ module cva6
       .branch_predict_o        (branch_predict_id_ex),          // branch predict to ex
       .resolve_branch_i        (resolve_branch_ex_id),          // in order to resolve the branch
       // LSU
-      .lsu_ready_i             (lsu_ready_ex_id),
-      .lsu_valid_o             (lsu_valid_id_ex),
+      .lsq_fu_data_o (lsq_fu_data_id_ex),
+      .lsq_full_i(lsq_full_ex_id),
+      .ld_we_o(ld_we_id_ex),
+      .st_we_o(st_we_id_ex),
+      .data_trans_id_o(data_trans_id_id_ex),
+      .vaddr_trans_id_o(vaddr_trans_id_id_ex),
+      .st_data_valid_o(st_data_valid_id_ex),
+      .vaddr_valid_o(vaddr_valid_id_ex),
+      .lsq_tinst_o(lsq_tinst_id_ex),
       // Multiplier
       .mult_valid_o            (mult_valid_id_ex),
       // FPU
@@ -920,7 +937,6 @@ module cva6
       .wt_valid_i              (wt_valid_ex_id),
       .x_we_i                  (x_we_ex_id),
       .x_rd_i                  (x_rd_ex_id),
-      .waddr_i                 (waddr_commit_id),
 
       .csr_waddr_i             (commit_csr_waddr_o),
       .csr_rdata_i             (commit_csr_rdata_o),
@@ -974,6 +990,7 @@ module cva6
       .rs1_forwarding_i(rs1_forwarding_id_ex),
       .rs2_forwarding_i(rs2_forwarding_id_ex),
       .fu_data_i(fu_data_id_ex),
+      .lsq_fu_data_i (lsq_fu_data_id_ex),
       .pc_i(pc_id_ex),
       .is_zcmt_i(zcmt_id_ex),
       .is_compressed_instr_i(is_compressed_instr_id_ex),
@@ -999,8 +1016,16 @@ module cva6
       // MULT
       .mult_valid_i(mult_valid_id_ex),
       // LSU
-      .lsu_ready_o(lsu_ready_ex_id),
-      .lsu_valid_i(lsu_valid_id_ex),
+      .lsq_full_o(lsq_full_ex_id),
+      .decoded_instr_valid_i(issue_entry_valid_id_issue),
+      .decoded_instr_ack_i(issue_instr_issue_id),
+      .ld_we_i(ld_we_id_ex),
+      .st_we_i(st_we_id_ex),
+      .data_trans_id_i(data_trans_id_id_ex),
+      .vaddr_trans_id_i(vaddr_trans_id_id_ex),
+      .st_data_valid_i(st_data_valid_id_ex),
+      .vaddr_valid_i(vaddr_valid_id_ex),
+      .lsq_tinst_i(lsq_tinst_id_ex),
 
       .load_result_o   (load_result_ex_id),
       .load_trans_id_o (load_trans_id_ex_id),
@@ -1121,7 +1146,6 @@ module cva6
       .commit_rd_o       (commit_rd_i_commit),
       .commit_op_o       (commit_op_i_commit),
       .commit_macro_ack_o(commit_macro_ack),
-      .waddr_o           (waddr_commit_id),
       .csr_waddr_o       (commit_csr_waddr_o),
       .csr_rdata_o       (commit_csr_rdata_o),
       .csr_we_o          (commit_csr_we_o),
@@ -1703,7 +1727,7 @@ module cva6
       .fetch_ack(id_stage_i.fetch_entry_ready_o[0]),
       .issue_ack(issue_entry_valid_id_issue[0] & issue_instr_issue_id[0]),
       .issue_sbe(issue_entry_id_issue[0]),
-      .waddr(waddr_commit_id),
+      .waddr(),
       .wdata(wdata_commit_id),
       .we_gpr(we_gpr_commit_id),
       .we_fpr(we_fpr_commit_id),

@@ -76,6 +76,26 @@ module issue_stage
     output branchpredict_sbe_t branch_predict_o,
     // Signaling that we resolved the branch - EX_STAGE
     input logic resolve_branch_i,
+
+    // FU data sent directly to lsq - LOAD_STORE_QUEUE
+    input fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_o,
+    // Instr to write to the load queue - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_o,
+    // Instr to write to the store queue - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrIssuePorts-1:0] st_we_o,
+    // trans id of the producer needed by a store - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_o,
+    // trans id of the producer needed by a store or load - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_o,
+    // data sent by issue stage is already valid - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_o,
+    // vaddr sent by issue stage is already valid - LOAD_STORE_QUEUE
+    input logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_o,
+    // LSQ is full - LOAD_STORE_QUEUE
+    output logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_i,
+    // Transformed trap instruction - LOAD_STORE_QUEUE
+    output logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_o,
+
     // Load store unit FU is ready - EX_STAGE
     input logic lsu_ready_i,
     // Load store unit FU is valid - EX_STAGE
@@ -142,8 +162,6 @@ module issue_stage
     input logic x_we_i,
     // CVXIF destination register - EX_STAGE
     input logic [4:0] x_rd_i,
-    // Destination register in register file - EX_STAGE
-    input logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] waddr_i,
     // csr write address - COMMIT_STAGE
     input logic [CVA6Cfg.RegAddrWidth-1:0] csr_waddr_i,
     // csr read data - COMMIT_STAGE
