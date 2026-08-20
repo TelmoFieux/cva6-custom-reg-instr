@@ -543,6 +543,8 @@ module ex_stage
   // ----------------
 
 
+  // The write back will probably cause a combinatorial loop
+  // if CVA6Cfg.NrLoadPipeRegs == 0
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] wb_trans_id;
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] wbdata;
   logic [CVA6Cfg.NrWbPorts-1:0] wt_valid;
@@ -552,9 +554,9 @@ module ex_stage
   assign wbdata[FLU_WB]   = flu_result_o;
   assign wt_valid[FLU_WB] = flu_valid_o;
 
-  assign wb_trans_id[STORE_WB] = store_trans_id_o;
-  assign wbdata[STORE_WB]   = store_result_o;
-  assign wt_valid[STORE_WB] = store_valid_o;
+  assign wb_trans_id[STORE_WB] = '0;
+  assign wbdata[STORE_WB]   = '0;
+  assign wt_valid[STORE_WB] = '0;
 
   assign wb_trans_id[LOAD_WB] = load_trans_id_o;
   assign wbdata[LOAD_WB]   = load_result_o;

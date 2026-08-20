@@ -57,7 +57,6 @@ module lsq_bypass
   //some operations might use gpr and fpr register as operands or destination
   logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
 
-  // rs1 should be addr and rs2 data but i am not 100% sure about this
   for (genvar i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
     if (!FPR_ENABLED) begin
       assign st_data_valid_o[i] = is_result_available_gpr_q[decoded_instr_i[i].rs2];

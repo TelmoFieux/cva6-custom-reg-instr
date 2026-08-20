@@ -423,7 +423,7 @@ module load_store_unit
       .flush_i,
       .stall_st_pending_i,
       .no_st_pending_o,
-      .valid_i   (st_valid_i),
+      .st_valid_i   (st_valid_i),
       .lsu_ctrl_i(st_lsq_ctrl),
       .paddr_i  (st_lsq_paddr),
       .sent_to_cache_o (st_sent_to_cache),
@@ -746,6 +746,21 @@ module load_store_unit
   );
 
   assign rvfi_lsu_ctrl_o = lsu_ctrl;
+  assign st_translation_req = (lsu_ctrl.fu == STORE);
+
+  // pragma translate off
+  assert property (
+  @(posedge clk_i) disable iff (!rst_ni)
+  translation_valid |-> !$isunknown(mmu_paddr)
+  )
+  else $error(
+    "TRANSLATION VALID BUT PADDR X: valid=%b paddr=%h lsu_paddr=%h pmp_valid=%b",
+    $sampled(translation_valid),
+    $sampled(mmu_paddr),
+    $sampled(lsu_paddr),
+    $sampled(pmp_translation_valid)
+  );
+  // pragma translate off
 
 endmodule
 

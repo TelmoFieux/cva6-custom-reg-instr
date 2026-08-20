@@ -82,11 +82,12 @@ module load_store_queue
     // Data TLB hit - lsu
     input logic                                                       dtlb_hit_i,
     // Physical page number from the DTLB - MMU
-    input logic                                                       dtlb_ppn_i,
+    input logic [CVA6Cfg.PPNW-1:0]                                    dtlb_ppn_i,
+
 
 
     // Destination register in register file - EX_STAGE
-    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1-1:0]  wb_trans_id_i,
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]    wb_trans_id_i,
     // Results to write back - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0]             wbdata_i,
     // Indicates valid results - EX_STAGE
@@ -205,6 +206,7 @@ module load_store_queue
   logic [$clog2(LSQ_DEPTH)-1:0] st_commit_pointer_n, st_commit_pointer_q;
   logic [$clog2(LSQ_DEPTH)-1:0] st_issue_pointer_n, st_issue_pointer_q;
   logic [$clog2(LSQ_DEPTH)-1:0] st_drain_pointer_n, st_drain_pointer_q;
+  logic [$clog2(LSQ_DEPTH+1)-1:0] st_status_cnt_n, st_status_cnt_q;
 
   logic [$clog2(LSQ_DEPTH)-1:0] translation_pointer_n, translation_pointer_q;
   logic [$clog2(LSQ_DEPTH)-1:0] previous_translation_pointer_n, previous_translation_pointer_q;
@@ -251,13 +253,21 @@ module load_store_queue
   logic [CVA6Cfg.NrIssuePorts-1:0] ld_full, st_full;
 
   for (genvar i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
-    assign full_o[i] = ld_we_i[i] ? ld_full[i] : st_drain_pointer_q == (st_issue_pointer_q + i);
+    assign st_full[i] = ((st_status_cnt_q + i) >= LSQ_DEPTH) && st_we_i[i];
+  end
+
+  for (genvar i = 0; i<CVA6Cfg.NrIssuePorts; i++) begin
+    assign full_o[i] = ld_we_i[i] ? ld_full[i] : st_full[i];
   end
 
   // Data sent to store buffer for execution
   assign st_buf_lsu_ctrl_o = st_queue_q.instr[st_commit_pointer_q];
   assign st_buf_paddr_o = st_queue_q.paddr[st_commit_pointer_q];
-  assign st_buf_valid_o = st_queue_q.ready[st_commit_pointer_q] & !st_queue_q.ex_valid[st_commit_pointer_q];
+  assign st_buf_valid_o = st_queue_q.reserved[st_commit_pointer_q]
+    && st_queue_q.ready[st_commit_pointer_q]
+    && st_queue_q.paddr_valid[st_commit_pointer_q]
+    && st_queue_q.data_valid[st_commit_pointer_q]
+    && !st_queue_q.ex_valid[st_commit_pointer_q];
 
   lsu_ctrl_t [CVA6Cfg.NrIssuePorts-1:0] decoded_req;
 
@@ -342,6 +352,13 @@ module load_store_queue
     data_is_valid = '0;
     st_data = '0;
 
+    vaddr_xlen = '0;
+    vaddr      = '0;
+    overflow   = '0;
+    g_overflow = '0;
+    be         = '0;
+    decoded_req = '0;
+
     for (int unsigned i = 0 ; i < CVA6Cfg.NrIssuePorts ; i++) begin
       if (vaddr_valid_i[i]) begin
         vaddr_xlen[i] = $unsigned($signed(fu_data_i[i].imm) + $signed(fu_data_i[i].operand_a));
@@ -393,7 +410,7 @@ module load_store_queue
       end
 
       decoded_req[i] = {
-        decoded_instr_valid_i[i] && ld_we_i[i] | st_we_i[i],
+        decoded_instr_valid_i[i] && (ld_we_i[i] | st_we_i[i]),
         vaddr[i],
         tinst_i[i],
         hs_ld_st_inst[i],
@@ -425,16 +442,25 @@ module load_store_queue
 
   always_comb begin : data_snooping
 
-    st_snooped_we = '0;
+    st_snooped_we         = '0;
+    st_snooped_vaddr      = '0;
     st_snooped_vaddr_xlen = '0;
-    ld_snooped_we = '0;
+    st_snooped_overflow   = '0;
+    st_snooped_g_overflow = '0;
+    st_snooped_be         = '0;
+
+    ld_snooped_we         = '0;
+    ld_snooped_vaddr      = '0;
     ld_snooped_vaddr_xlen = '0;
+    ld_snooped_overflow   = '0;
+    ld_snooped_g_overflow = '0;
+    ld_snooped_be         = '0;
 
 
     // Snooping CDB in case we are missing some data
     for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
       for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
-        if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.vaddr_trans_id[i]) begin
+        if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.vaddr_trans_id[i] && st_queue_q.reserved[i] && !st_queue_q.vaddr_valid[i]) begin
           st_snooped_vaddr_xlen[i] = $unsigned($signed(st_queue_q.result[i]) + $signed(wbdata_i[j]));
           st_snooped_we[i] = 1'b1;
           st_snooped_vaddr[i] = st_snooped_vaddr_xlen[i][CVA6Cfg.VLEN-1:0];
@@ -452,7 +478,7 @@ module load_store_queue
           end
         end
 
-        if (wt_valid_i[j] && wb_trans_id_i[j] == ld_queue_q.vaddr_trans_id[i]) begin
+        if (wt_valid_i[j] && wb_trans_id_i[j] == ld_queue_q.vaddr_trans_id[i] && ld_queue_q.reserved[i] && !ld_queue_q.vaddr_valid[i]) begin
           ld_snooped_vaddr_xlen[i] = $unsigned($signed(ld_queue_q.result[i]) + $signed(wbdata_i[j]));
           ld_snooped_we[i] = 1'b1;
           ld_snooped_vaddr[i] = ld_snooped_vaddr_xlen[i][CVA6Cfg.VLEN-1:0];
@@ -499,9 +525,9 @@ module load_store_queue
 
   logic [CVA6Cfg.NrIssuePorts:0][LSQ_DEPTH-1:0] ld_free_entries_masked;
   logic [CVA6Cfg.NrIssuePorts-1:0] ld_empty_mask;
-  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(LSQ_DEPTH):0] ld_alloc_idx;
+  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(LSQ_DEPTH)-1:0] ld_alloc_idx;
 
-  assign ld_free_entries_masked[0] = ld_queue_q.reserved;
+  assign ld_free_entries_masked[0] = ~ld_queue_q.reserved;
 
   //priority encoder cascade to get free index in load queue
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : ld_alloc_tree
@@ -552,12 +578,23 @@ module load_store_queue
 
   always_comb begin : updating_queues
 
-    automatic logic [LSQ_DEPTH-1:0] st_issue_pointer;
+    automatic logic [$clog2(LSQ_DEPTH)-1:0] st_issue_pointer;
+    automatic logic [$clog2(LSQ_DEPTH+1)-1:0] st_status_cnt;
+
+    ld_is_forwarded = '0;
+
+    ld_queue_n = ld_queue_q;
+    st_queue_n = st_queue_q;
+
+    st_valid_o    = 1'b0;
+    st_trans_id_o = '0;
+    st_result_o   = '0;
+    st_ex_o       = '0;
 
     // Load queue initialisation
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (ld_we_i[i] && decoded_instr_ack_i[i] && !ld_full[i]) begin
-        ld_queue_n.reserved = ld_free_entries_masked[i+1];
+        ld_queue_n.reserved[ld_alloc_idx[i]] = 1'b1;
         ld_queue_n.instr[ld_alloc_idx[i]] = decoded_req[i];
         ld_queue_n.ready[ld_alloc_idx[i]] = '0;
         ld_queue_n.vaddr_trans_id[ld_alloc_idx[i]] = vaddr_trans_id_i[i];
@@ -568,6 +605,7 @@ module load_store_queue
 
     //store queue initialisation
     st_issue_pointer = st_issue_pointer_q;
+    st_status_cnt = st_status_cnt_q;
 
     for (int unsigned i = 0 ; i < CVA6Cfg.NrIssuePorts ; i++) begin
       if (st_we_i[i] && !st_full[i] && decoded_instr_ack_i[i]) begin
@@ -580,10 +618,9 @@ module load_store_queue
         st_queue_n.vaddr_trans_id[st_issue_pointer] = vaddr_trans_id_i[i];
         st_queue_n.data_trans_id[st_issue_pointer] = data_trans_id_i[i];
         st_issue_pointer = st_issue_pointer + 1'b1;
+        st_status_cnt = st_status_cnt + 1'b1;
       end
     end
-
-    st_issue_pointer_n = st_issue_pointer;
 
     // Adding snooped data to the queues
     for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
@@ -609,11 +646,11 @@ module load_store_queue
 
     for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
       for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
-        if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.data_trans_id[i]) begin
+        if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.data_trans_id[i] && st_queue_q.reserved[i] && !st_queue_q.data_valid[i]) begin
           data_snooped_valid[i] = 1'b1;
           data_snooped[i] = wbdata_i[j];
           st_queue_n.instr[i].data = wbdata_i[j];
-          st_queue_n.data_valid = 1'b1;
+          st_queue_n.data_valid[i] = 1'b1;
         end
       end
     end
@@ -621,28 +658,56 @@ module load_store_queue
     //Updating paddr
     if (translation_data_valid_q && (CVA6Cfg.MmuPresent || CVA6Cfg.NonIdemPotenceEn)) begin
       if (previous_translation_pointer_type_q == 1'b1) begin
-        st_queue_n.paddr[previous_translation_pointer_q] = paddr_i;
-        st_queue_n.paddr_valid[previous_translation_pointer_q] = 1'b1;
+        if (!ex_i.valid) begin
+          st_queue_n.paddr[previous_translation_pointer_q] = paddr_i;
+          st_queue_n.paddr_valid[previous_translation_pointer_q] = 1'b1;
+        end
       end else begin
-        ld_queue_n.paddr[previous_translation_pointer_q] = paddr_i;
-        ld_queue_n.paddr_valid[previous_translation_pointer_q] = 1'b1;
-        ld_queue_n.paddr_ni[previous_translation_pointer_q] = config_pkg::is_inside_nonidempotent_regions
+        if (!ex_i.valid) begin
+          ld_queue_n.paddr[previous_translation_pointer_q] = paddr_i;
+          ld_queue_n.paddr_valid[previous_translation_pointer_q] = 1'b1;
+        end
+      end
+    end else if (!(CVA6Cfg.MmuPresent || CVA6Cfg.NonIdemPotenceEn)) begin
+      for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
+        st_queue_n.paddr[i] = CVA6Cfg.PLEN'(st_queue_q.instr[i].vaddr);
+        st_queue_n.paddr_valid[i] = st_queue_q.vaddr_valid[i];
+        ld_queue_n.paddr[i] = CVA6Cfg.PLEN'(ld_queue_q.instr[i].vaddr);
+        ld_queue_n.paddr_valid[i] = ld_queue_q.vaddr_valid[i];
+      end
+    end
+
+    // updating non idempotent state
+    if (CVA6Cfg.MmuPresent && dtlb_hit_i && comb_translation_pointer_type == 1'b0) begin
+      if (dtlb_hit_i) begin
+        if (translation_pointer_valid_q) begin
+          // update based on register
+          ld_queue_n.paddr_ni[translation_pointer_valid_q] = config_pkg::is_inside_nonidempotent_regions
+            (
+              CVA6Cfg,
+              {{52 - CVA6Cfg.PPNW{1'b0}}, dtlb_ppn_i, 12'd0}
+            ) && CVA6Cfg.NonIdemPotenceEn;
+        end else begin
+          // update based on combinatory signals
+          ld_queue_n.paddr_ni[comb_translation_pointer] = config_pkg::is_inside_nonidempotent_regions
+            (
+              CVA6Cfg,
+              {{52 - CVA6Cfg.PPNW{1'b0}}, dtlb_ppn_i, 12'd0}
+            ) && CVA6Cfg.NonIdemPotenceEn;
+        end
+      end
+    end else if (CVA6Cfg.NonIdemPotenceEn && translation_req_o && comb_translation_pointer_type == 1'b0) begin
+      ld_queue_n.paddr_ni[comb_translation_pointer] = config_pkg::is_inside_nonidempotent_regions
         (
           CVA6Cfg,
           {{52 - CVA6Cfg.PPNW{1'b0}}, dtlb_ppn_i, 12'd0}
         ) && CVA6Cfg.NonIdemPotenceEn;
-      end
-    end else if (!(CVA6Cfg.MmuPresent || CVA6Cfg.NonIdemPotenceEn)) begin
-      for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
-        st_queue_n.instr[i].paddr = st_queue_q.instr[i].vaddr;
-        st_queue_n.instr[i].paddr_valid = st_queue_q.vaddr_valid[i];
-        ld_queue_n.instr[i].paddr = ld_queue_q.instr[i].vaddr;
-        ld_queue_n.instr[i].paddr_valid = ld_queue_q.vaddr_valid[i];
-      end
     end
 
+
+
     // load exception
-    if (ex_i.valid && previous_translation_pointer_type_q == 1'b0) begin
+    if (translation_data_valid_q && ex_i.valid && previous_translation_pointer_type_q == 1'b0) begin
       ld_queue_n.ex[previous_translation_pointer_q]= ex_i;
       ld_queue_n.result_valid[previous_translation_pointer_q]= 1'b1;
       ld_queue_n.ex[previous_translation_pointer_q].cause = ex_i.cause;
@@ -652,12 +717,15 @@ module load_store_queue
       ld_queue_n.ex[previous_translation_pointer_q].gva = CVA6Cfg.RVH ? ex_i.gva : 1'b0;
     end
 
-    // store exception
-    if (ex_i.valid && previous_translation_pointer_type_q == 1'b1) begin
+
+    // store write back
+    if (translation_data_valid_q && previous_translation_pointer_type_q == 1'b1) begin
       st_trans_id_o = st_queue_q.instr[previous_translation_pointer_q].trans_id;
       st_ex_o = ex_i;
       st_valid_o = 1'b1;
-      st_queue_n.ex_valid[previous_translation_pointer_q] = 1'b1;
+      if (ex_i.valid) begin
+        st_queue_n.ex_valid[previous_translation_pointer_q] = 1'b1;
+      end
     end
 
 
@@ -740,7 +808,8 @@ module load_store_queue
     st_commit_pointer_n = st_commit_pointer_q;
     st_drain_pointer_n = st_drain_pointer_q;
 
-    if (st_queue_q.ready[st_commit_pointer_q] & !st_queue_q.ex_valid[st_commit_pointer_q] & commit_i) begin
+    if (st_queue_q.ready[st_commit_pointer_q] & !st_queue_q.ex_valid[st_commit_pointer_q]
+        & commit_i & (commit_trans_id_i == st_queue_q.instr[st_commit_pointer_q].trans_id)) begin
       st_commit_pointer_n = st_commit_pointer_n + 1'b1;
     end
 
@@ -752,7 +821,9 @@ module load_store_queue
       st_queue_n.paddr_valid[st_drain_pointer_q] = '0;
       st_queue_n.ex_valid[st_drain_pointer_q] = '0;
       st_drain_pointer_n = st_drain_pointer_n + 1'b1;
+      st_status_cnt = st_status_cnt - 1'b1;
     end
+
 
     //load unit
     if (ld_pop_i) begin
@@ -778,7 +849,7 @@ module load_store_queue
 
     for (int unsigned i = 0; i < LSQ_DEPTH; i++) begin
       for (int unsigned j = 0 ; j<CVA6Cfg.RollbackWidth ; j++) begin
-        if (ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
+        if (ld_queue_q.reserved[i] && ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
           ld_queue_n.reserved[i] = 1'b0;
           ld_queue_n.ready[i] = 1'b0;
           ld_queue_n.vaddr_valid[i] = 1'b0;
@@ -786,13 +857,15 @@ module load_store_queue
           ld_queue_n.result_valid[i] = 1'b0;
           ld_queue_n.ex[i] = '0;
         end
-        if (st_queue_q.instr[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
+        if (st_queue_q.reserved[i] && st_queue_q.instr[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
           st_queue_n.reserved[i] = 1'b0;
           st_queue_n.ready[i] = 1'b0;
           st_queue_n.vaddr_valid[i] = 1'b0;
           st_queue_n.paddr_valid[i] = 1'b0;
           st_queue_n.data_valid[i] = 1'b0;
           st_queue_n.ex_valid[i] = '0;
+          st_status_cnt = st_status_cnt - 1'b1;
+          st_issue_pointer = st_issue_pointer -1'b1;
         end
       end
     end
@@ -805,10 +878,32 @@ module load_store_queue
       st_queue_n = '0;
       st_drain_pointer_n = '0;
       st_commit_pointer_n = '0;
-      st_issue_pointer_n = '0;
+      st_issue_pointer = '0;
+      st_status_cnt = '0;
 
     end
 
+    //update store count
+    st_status_cnt_n = st_status_cnt;
+    st_issue_pointer_n = st_issue_pointer;
+
+  end
+
+
+  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(LSQ_DEPTH)-1:0] st_alloc_idx;
+
+  always_comb begin : st_alloc
+    automatic logic [$clog2(LSQ_DEPTH)-1:0] ptr;
+
+    ptr = st_issue_pointer_q;
+
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      st_alloc_idx[i] = ptr;
+
+      if (st_we_i[i] && decoded_instr_ack_i[i] && !st_full[i]) begin
+        ptr = ptr + 1'b1;
+      end
+    end
   end
 
 
@@ -824,7 +919,7 @@ module load_store_queue
   logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] ld_tournament_id;
 
   for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
-    assign ld_tournament_seq_num[i] = ld_queue_q.instr[i].global_id;
+    assign ld_tournament_seq_num[i] = ld_comb_lsu_ctrl_o[i].global_id;
     assign ld_tournament_valid[i] = ld_comb_vaddr_valid[i];
     assign ld_tournament_id[i] = i;
   end
@@ -848,7 +943,7 @@ module load_store_queue
   logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] st_tournament_id;
 
   for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
-    assign st_tournament_seq_num[i] = st_queue_q.instr[i].global_id;
+    assign st_tournament_seq_num[i] = st_comb_lsu_ctrl_o[i].global_id;
     assign st_tournament_valid[i] = st_comb_vaddr_valid[i];
     assign st_tournament_id[i] = i;
   end
@@ -870,29 +965,40 @@ module load_store_queue
 
   // Virtual adress translation data
   assign hs_ld_st_inst_o = CVA6Cfg.RVH ?
-    translation_pointer_valid_q ?
+    translation_pointer_valid_q & CVA6Cfg.MmuPresent ?
       (translation_pointer_type_q ? st_queue_q.instr[translation_pointer_q].hs_ld_st_inst : ld_queue_q.instr[translation_pointer_q].hs_ld_st_inst)
     : (comb_translation_pointer_type ? st_comb_hs_ld_st_inst_o[comb_translation_pointer] : ld_comb_hs_ld_st_inst_o[comb_translation_pointer])
   : 1'b0;
   assign hlvx_inst_o = CVA6Cfg.RVH ?
-    translation_pointer_valid_q ?
+    translation_pointer_valid_q & CVA6Cfg.MmuPresent ?
       (translation_pointer_type_q ? st_queue_q.instr[translation_pointer_q].hlvx_inst : ld_queue_q.instr[translation_pointer_q].hlvx_inst)
     : (comb_translation_pointer_type ? st_comb_hlvx_inst_o[comb_translation_pointer] : ld_comb_hlvx_inst_o[comb_translation_pointer])
   : 1'b0;
   assign tinst_o = CVA6Cfg.RVH ?
-    translation_pointer_valid_q ?
+    translation_pointer_valid_q & CVA6Cfg.MmuPresent ?
       (translation_pointer_type_q ? st_queue_q.instr[translation_pointer_q].tinst : ld_queue_q.instr[translation_pointer_q].tinst)
     : (comb_translation_pointer_type ? st_comb_tinst_o[comb_translation_pointer] : ld_comb_tinst_o[comb_translation_pointer])
   : 1'b0;
-  assign vaddr_o = translation_pointer_valid_q ?
+  assign vaddr_o = translation_pointer_valid_q & CVA6Cfg.MmuPresent ?
       (translation_pointer_type_q ? st_queue_q.instr[translation_pointer_q].vaddr : ld_queue_q.instr[translation_pointer_q].vaddr)
     : (comb_translation_pointer_type ? st_comb_vaddr_o[comb_translation_pointer] : ld_comb_vaddr_o[comb_translation_pointer]);
-  assign lsu_ctrl_o = translation_pointer_valid_q ?
+  assign lsu_ctrl_o = translation_pointer_valid_q & CVA6Cfg.MmuPresent ?
       (translation_pointer_type_q ? st_queue_q.instr[translation_pointer_q] : ld_queue_q.instr[translation_pointer_q])
     : (comb_translation_pointer_type ? st_comb_lsu_ctrl_o[comb_translation_pointer] : ld_comb_lsu_ctrl_o[comb_translation_pointer]);
-  assign translation_req_o = translation_pointer_valid_q || comb_translation_pointer_valid;
+  assign translation_req_o = CVA6Cfg.MmuPresent ?
+      (translation_pointer_valid_q || comb_translation_pointer_valid)
+    : comb_translation_pointer_valid;
 
   always_comb begin : comb_translation_data
+
+
+    automatic logic [LSQ_DEPTH-1:0] st_is_translating;
+    automatic logic [LSQ_DEPTH-1:0] ld_is_translating;
+
+    for (int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
+      st_is_translating[i] = (CVA6Cfg.MmuPresent && translation_pointer_valid_q && translation_pointer_type_q == 1'b1 && translation_pointer_q == i);
+      ld_is_translating[i] = (CVA6Cfg.MmuPresent && translation_pointer_valid_q && translation_pointer_type_q == 1'b0 && translation_pointer_q == i);
+    end
 
     st_comb_vaddr_valid = '0;
     st_comb_lsu_ctrl_o = '0;
@@ -910,7 +1016,9 @@ module load_store_queue
 
     //update current cycle vaddr validity
     for (int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
-      if (st_queue_q.reserved[i] && st_queue_q.vaddr_valid[i] && !st_queue_q.paddr_valid[i]) begin
+
+      // validity updated from st_queue_q and current paddr state
+      if (st_queue_q.reserved[i] && st_queue_q.vaddr_valid[i] && !st_paddr_valid[i] && !st_is_translating[i]) begin
         st_comb_vaddr_valid[i] = 1'b1;
         st_comb_lsu_ctrl_o[i] = st_queue_q.instr[i];
         st_comb_vaddr_o[i] = st_queue_q.instr[i].vaddr;
@@ -919,9 +1027,10 @@ module load_store_queue
         st_comb_hlvx_inst_o[i] = st_queue_q.instr[i].hlvx_inst;
       end
 
+      // validity updated from currently reserved instr
       for (int unsigned j = 0 ; j < CVA6Cfg.NrIssuePorts ; j++) begin
-        if (vaddr_is_valid[j] & (st_issue_pointer_q + j) == i & st_we_i[j] & decoded_instr_ack_i[j] & !st_full[j]) begin
-          st_comb_vaddr_valid = 1'b1;
+        if (vaddr_is_valid[j] & st_alloc_idx[j] == i & st_we_i[j] & decoded_instr_ack_i[j] & !st_full[j]) begin
+          st_comb_vaddr_valid[i] = 1'b1;
           st_comb_lsu_ctrl_o[i] = decoded_req[j];
           st_comb_vaddr_o[i] = vaddr[j];
           st_comb_tinst_o[i] = tinst_i[j];
@@ -930,8 +1039,9 @@ module load_store_queue
         end
       end
 
+      // validity updated from snooping after reserving an entry
       if (st_snooped_we[i]) begin
-        st_comb_vaddr_valid = 1'b1;
+        st_comb_vaddr_valid[i] = 1'b1;
         st_comb_lsu_ctrl_o[i] = st_queue_q.instr[i];
         st_comb_lsu_ctrl_o[i].overflow = st_snooped_overflow[i];
         st_comb_lsu_ctrl_o[i].g_overflow = st_snooped_g_overflow[i];
@@ -943,7 +1053,8 @@ module load_store_queue
       end
 
 
-      if (ld_queue_q.reserved[i] && ld_queue_q.vaddr_valid[i] && !ld_queue_q.paddr_valid[i]) begin
+      // validity updated from st_queue_q and current paddr state
+      if (ld_queue_q.reserved[i] && ld_queue_q.vaddr_valid[i] && !ld_paddr_valid[i] && !ld_is_translating[i]) begin
         ld_comb_vaddr_valid[i] = 1'b1;
         ld_comb_lsu_ctrl_o[i] = ld_queue_q.instr[i];
         ld_comb_vaddr_o[i] = ld_queue_q.instr[i].vaddr;
@@ -952,9 +1063,10 @@ module load_store_queue
         ld_comb_hlvx_inst_o[i] = ld_queue_q.instr[i].hlvx_inst;
       end
 
+      // validity updated from currently reserved instr
       for (int unsigned j = 0 ; j < CVA6Cfg.NrIssuePorts ; j++) begin
         if (vaddr_is_valid[j] & ld_alloc_idx[j] == i & ld_we_i[j] & decoded_instr_ack_i[j] & !ld_full[j]) begin
-          ld_comb_vaddr_valid = 1'b1;
+          ld_comb_vaddr_valid[i] = 1'b1;
           ld_comb_lsu_ctrl_o[i] = decoded_req[j];
           ld_comb_vaddr_o[i] = vaddr[j];
           ld_comb_tinst_o[i] = tinst_i[j];
@@ -963,8 +1075,9 @@ module load_store_queue
         end
       end
 
+      // validity updated from snooping after reserving an entry
       if (ld_snooped_we[i]) begin
-        ld_comb_vaddr_valid = 1'b1;
+        ld_comb_vaddr_valid[i] = 1'b1;
         ld_comb_lsu_ctrl_o[i] = ld_queue_q.instr[i];
         ld_comb_lsu_ctrl_o[i].overflow = ld_snooped_overflow[i];
         ld_comb_lsu_ctrl_o[i].g_overflow = ld_snooped_g_overflow[i];
@@ -993,60 +1106,105 @@ module load_store_queue
     previous_translation_pointer_type_n = previous_translation_pointer_type_q;
     translation_pointer_valid_n = translation_pointer_valid_q;
     translation_pointer_type_n = translation_pointer_type_q;
-    translation_data_valid_n = dtlb_hit_i;
+    translation_data_valid_n = '0;
     comb_translation_pointer = '0;
     comb_translation_pointer_type = 1'b0;
     comb_translation_pointer_valid = '0;
 
-    //as soon as a page hit is received, prepare the next translation
-    if ((dtlb_hit_i || !translation_pointer_valid_q) && (CVA6Cfg.MmuPresent || CVA6Cfg.NonIdemPotenceEn)) begin
-      //keep the translation info for the next cycle when we receive mmu data
-      //necessary because we compute new value on page hit
-      previous_translation_pointer_type_n = translation_pointer_type_q;
-      previous_translation_pointer_n = translation_pointer_q;
-      translation_pointer_valid_n = '0;
-      if (is_older(ld_comb_lsu_ctrl_o[ld_translation_pointer].global_id, st_comb_lsu_ctrl_o[st_translation_pointer].global_id) & ld_translation_pointer_valid) begin
+    // with MMU enable as soon as a page hit is received, prepare the next translation
+    if (CVA6Cfg.MmuPresent) begin
+
+      translation_data_valid_n = dtlb_hit_i;
+
+      if (!translation_pointer_valid_q || dtlb_hit_i) begin
+
+        // by default no new request
+        translation_pointer_valid_n = '0;
+
+        if (ld_translation_pointer_valid &&
+          (!st_translation_pointer_valid ||
+          is_older(ld_comb_lsu_ctrl_o[ld_translation_pointer].global_id, st_comb_lsu_ctrl_o[st_translation_pointer].global_id)))
+        begin
+          comb_translation_pointer = ld_translation_pointer;
+          comb_translation_pointer_type = 1'b0;
+          comb_translation_pointer_valid = ld_translation_pointer_valid;
+
+          if (!dtlb_hit_i) begin
+            translation_pointer_n = ld_translation_pointer;
+            translation_pointer_valid_n = ld_translation_pointer_valid;
+            translation_pointer_type_n = 1'b0;
+          end
+        end else if (st_translation_pointer_valid) begin
+          comb_translation_pointer = st_translation_pointer;
+          comb_translation_pointer_type = 1'b1;
+          comb_translation_pointer_valid = st_translation_pointer_valid;
+
+          if (!dtlb_hit_i) begin
+            translation_pointer_n = st_translation_pointer;
+            translation_pointer_valid_n = st_translation_pointer_valid;
+            translation_pointer_type_n = 1'b1;
+          end
+        end
+
+      end
+
+      if (translation_pointer_valid_q) begin
+        previous_translation_pointer_n = translation_pointer_q;
+        previous_translation_pointer_type_n = translation_pointer_type_q;
+      end else if (comb_translation_pointer_valid) begin
+        previous_translation_pointer_n = comb_translation_pointer;
+        previous_translation_pointer_type_n = comb_translation_pointer_type;
+      end
+
+    // without mmu translation always takes 1 cycle so prepare next translation as soon as the
+    // previous one is sent
+    end else if (CVA6Cfg.NonIdemPotenceEn) begin
+
+      translation_data_valid_n = translation_req_o;
+
+      if (ld_translation_pointer_valid &&
+        (!st_translation_pointer_valid ||
+        is_older(ld_comb_lsu_ctrl_o[ld_translation_pointer].global_id, st_comb_lsu_ctrl_o[st_translation_pointer].global_id)))
+      begin
         comb_translation_pointer = ld_translation_pointer;
         comb_translation_pointer_type = 1'b0;
         comb_translation_pointer_valid = ld_translation_pointer_valid;
-        translation_pointer_n = ld_translation_pointer;
-        translation_pointer_valid_n = ld_translation_pointer_valid;
-        translation_pointer_type_n = 1'b0;
-      end else begin
+      end else if (st_translation_pointer_valid) begin
         comb_translation_pointer = st_translation_pointer;
         comb_translation_pointer_type = 1'b1;
         comb_translation_pointer_valid = st_translation_pointer_valid;
-        translation_pointer_n = st_translation_pointer;
-        translation_pointer_valid_n = st_translation_pointer_valid;
-        translation_pointer_type_n = 1'b1;
       end
+
+      //keep the translation info for the next cycle when we receive mmu data
+      //necessary because we compute new value on page hit or req sent
+      previous_translation_pointer_type_n = comb_translation_pointer_type;
+      previous_translation_pointer_n = comb_translation_pointer;
+
     end
 
     // Rollback
     for (int unsigned i = 0 ; i<CVA6Cfg.RollbackWidth ; i++) begin
-      if (translation_pointer_q == rollback_trans_id_i[i] && rollback_i[i]) begin
 
-        // cancel initiated translation
-        if (translation_pointer_valid_q) begin
-          translation_pointer_valid_n = '0;
-          translation_data_valid_n = '0;
-        end
-
-        // invalidate data
-        if(dtlb_hit_i) begin
+      if (rollback_i[i] && translation_pointer_valid_q) begin
+        if ((translation_pointer_type_q == 1'b0 && ld_queue_q.instr[translation_pointer_q].trans_id == rollback_trans_id_i[i]) ||
+          (translation_pointer_type_q == 1'b1 && st_queue_q.instr[translation_pointer_q].trans_id == rollback_trans_id_i[i]))
+        begin
+          translation_pointer_valid_n = 1'b0;
           translation_data_valid_n = '0;
         end
       end
 
-      // prevent new translation request
-      if (translation_pointer_n == rollback_trans_id_i[i] && rollback_i[i]) begin
-        translation_pointer_valid_n = 1'b0;
+      if (rollback_i[i] && translation_req_o) begin
+        if (lsu_ctrl_o.trans_id == rollback_trans_id_i[i]) begin
+          translation_pointer_valid_n = 1'b0;
+          translation_data_valid_n = '0;
+        end
       end
 
       if (comb_translation_pointer_valid &&
         ((comb_translation_pointer_type == 1'b0 && ld_comb_lsu_ctrl_o[comb_translation_pointer].trans_id == rollback_trans_id_i[i])
-        || (comb_translation_pointer_type == 1'b1 && st_comb_lsu_ctrl_o[comb_translation_pointer].trans_id == rollback_trans_id_i[i]))
-      && rollback_i[i]) begin
+        || (comb_translation_pointer_type == 1'b1 && st_comb_lsu_ctrl_o[comb_translation_pointer].trans_id == rollback_trans_id_i[i])) && rollback_i[i])
+      begin
         comb_translation_pointer_valid = 1'b0;
       end
 
@@ -1072,6 +1230,7 @@ module load_store_queue
   assign ld_unit_lsu_ctrl_o = ld_queue_q.instr[ld_ready_pointer];
   assign ld_unit_paddr_o = ld_paddr[ld_ready_pointer];
   assign ld_unit_valid_o = ld_ready_pointer_valid & !ldbuf_full_i;
+  assign ld_unit_idx_o = ld_ready_pointer;
 
   always_comb begin : adress_dependencies
 
@@ -1080,7 +1239,7 @@ module load_store_queue
         (previous_translation_pointer_type_q == 1'b0 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
       ld_paddr[i] = ld_queue_q.paddr_valid[i] ? ld_queue_q.paddr[i] : paddr_i;
       st_paddr_valid[i] = st_queue_q.paddr_valid[i] ||
-        (previous_translation_pointer_type_q == 1'b0 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
+        (previous_translation_pointer_type_q == 1'b1 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
       st_paddr[i] = st_queue_q.paddr_valid[i] ? st_queue_q.paddr[i] : paddr_i;
     end
 
@@ -1167,6 +1326,12 @@ module load_store_queue
     st_older_all_valid = '1;
 
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
+      data_valid[i] = st_queue_q.data_valid[i] || data_snooped_valid[i];
+      data[i] = st_queue_q.data_valid[i] ? st_queue_q.instr[i].data : data_snooped[i];
+    end
+
+
+    for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
       for (int unsigned j = 0; j<LSQ_DEPTH; j ++) begin
         if (is_older(st_queue_q.instr[j].global_id, ld_queue_q.instr[i].global_id) && st_queue_q.reserved[j]) begin
           st_older[i][j] = 1'b1;
@@ -1177,12 +1342,6 @@ module load_store_queue
           if (!data_valid[j]) st_older_all_valid[i] = 1'b0;
         end
       end
-    end
-
-
-    for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
-      data_valid[i] = st_queue_q.data_valid[i] || data_snooped_valid;
-      data[i] = st_queue_q.data_valid[i] ? st_queue_q.instr[i].data : data_snooped;
     end
 
 
@@ -1215,11 +1374,15 @@ module load_store_queue
   //assign load write back info
   assign ld_result_o = wb_data[ld_wb_pointer];
   assign ld_ex_o = wb_ex[ld_wb_pointer];
-  assign ld_valid_o = wb_valid[ld_wb_pointer];
+  assign ld_valid_o = ld_wb_pointer_valid;
   assign ld_global_id_o = ld_queue_q.instr[ld_wb_pointer].global_id;
   assign ld_trans_id_o = ld_queue_q.instr[ld_wb_pointer].trans_id;
 
   always_comb begin : ld_write_back
+
+    wb_ex = '0;
+    wb_data = '0;
+    wb_ex= '0;
 
     //determine wich load is ready to write back
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
@@ -1274,27 +1437,106 @@ module load_store_queue
     if (!rst_ni) begin
       st_queue_q <= '0;
       ld_queue_q <= '0;
-      st_issue_pointer_q = '0;
-      st_drain_pointer_q = '0;
-      st_commit_pointer_q = '0;
-      translation_pointer_q = '0;
-      previous_translation_pointer_q = '0;
-      translation_pointer_valid_q = '0;
-      translation_data_valid_q = '0;
-      translation_pointer_type_q = '0;
-      previous_translation_pointer_type_q = '0;
+      st_status_cnt_q <= '0;
+      st_issue_pointer_q <= '0;
+      st_drain_pointer_q <= '0;
+      st_commit_pointer_q <= '0;
+      translation_pointer_q <= '0;
+      previous_translation_pointer_q <= '0;
+      translation_pointer_valid_q <= '0;
+      translation_data_valid_q <= '0;
+      translation_pointer_type_q <= '0;
+      previous_translation_pointer_type_q <= '0;
     end else begin
       st_queue_q <= st_queue_n;
       ld_queue_q <= ld_queue_n;
-      st_issue_pointer_q = st_issue_pointer_n;
-      st_drain_pointer_q = st_drain_pointer_n;
-      st_commit_pointer_q = st_commit_pointer_n;
-      translation_data_valid_q = translation_data_valid_n;
-      translation_pointer_q = translation_pointer_n;
-      previous_translation_pointer_q = previous_translation_pointer_n;
-      previous_translation_pointer_type_q = previous_translation_pointer_type_n;
-      translation_pointer_valid_q = translation_pointer_valid_n;
-      translation_pointer_type_q = translation_pointer_type_n;
+      st_status_cnt_q <= st_status_cnt_n;
+      st_issue_pointer_q <= st_issue_pointer_n;
+      st_drain_pointer_q <= st_drain_pointer_n;
+      st_commit_pointer_q <= st_commit_pointer_n;
+      translation_data_valid_q <= translation_data_valid_n;
+      translation_pointer_q <= translation_pointer_n;
+      previous_translation_pointer_q <= previous_translation_pointer_n;
+      previous_translation_pointer_type_q <= previous_translation_pointer_type_n;
+      translation_pointer_valid_q <= translation_pointer_valid_n;
+      translation_pointer_type_q <= translation_pointer_type_n;
     end
   end
+
+  //pragma translate_off
+
+  assert property (
+  @(posedge clk_i) disable iff (!rst_ni)
+  st_status_cnt_q == $countones(st_queue_q.reserved)
+  )
+  else begin
+    $display(
+      "SQ COUNT DESYNC: cnt=%0d reserved=%b drain=%0d commit=%0d issue=%0d sent=%b",
+      st_status_cnt_q,
+      st_queue_q.reserved,
+      st_drain_pointer_q,
+      st_commit_pointer_q,
+      st_issue_pointer_q,
+      st_sent_to_cache_i
+    );
+    $fatal(1);
+  end
+
+  assert property (
+    @(posedge clk_i) disable iff (!rst_ni)
+    st_buf_valid_o |-> st_queue_q.reserved[st_commit_pointer_q]
+  )
+  else $error(
+    "ST BUF INVALID RESERVED: ptr=%0d ready=%b reserved=%b paddr_valid=%b paddr=%h",
+    $sampled(st_commit_pointer_q),
+    $sampled(st_queue_q.ready[st_commit_pointer_q]),
+    $sampled(st_queue_q.reserved[st_commit_pointer_q]),
+    $sampled(st_queue_q.paddr_valid[st_commit_pointer_q]),
+    $sampled(st_queue_q.paddr[st_commit_pointer_q])
+  );
+
+  assert property (
+    @(posedge clk_i) disable iff (!rst_ni)
+    st_buf_valid_o |-> st_queue_q.paddr_valid[st_commit_pointer_q]
+  )
+  else $error(
+    "ST BUF INVALID PADDR_VALID: ptr=%0d paddr=%h",
+    $sampled(st_commit_pointer_q),
+    $sampled(st_queue_q.paddr[st_commit_pointer_q])
+  );
+
+  assert property (
+    @(posedge clk_i) disable iff (!rst_ni)
+    st_buf_valid_o |-> !$isunknown(st_queue_q.paddr[st_commit_pointer_q])
+  )
+  else $error(
+    "ST BUF X PADDR: ptr=%0d tid=%0d paddr=%h",
+    $sampled(st_commit_pointer_q),
+    $sampled(st_queue_q.instr[st_commit_pointer_q].trans_id),
+    $sampled(st_queue_q.paddr[st_commit_pointer_q])
+  );
+
+  for (genvar i = 0; i < LSQ_DEPTH; i++) begin
+  assert property (
+    @(posedge clk_i) disable iff (!rst_ni)
+    st_queue_q.ready[i]
+    |->
+    (
+      st_queue_q.reserved[i] &&
+      st_queue_q.paddr_valid[i] &&
+      st_queue_q.data_valid[i]
+    )
+  )
+  else $error(
+    "SQ READY CORRUPTED: idx=%0d ready=%b reserved=%b paddr_valid=%b data_valid=%b",
+    i,
+    $sampled(st_queue_q.ready[i]),
+    $sampled(st_queue_q.reserved[i]),
+    $sampled(st_queue_q.paddr_valid[i]),
+    $sampled(st_queue_q.data_valid[i])
+  );
+  end
+
+  //pragma translate_on
+
 endmodule

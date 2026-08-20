@@ -220,26 +220,32 @@ module scoreboard
     end
   end
 
-  always_comb begin : lsq_info
-    for (int unsigned i = 0; i < CVA6Cfg.NR_SB_ENTRIES ; i++) begin
-      if (mem_q[i].issued & mem_q[i].sbe.rd == decoded_instr_i[i].rs1) begin
-        vaddr_trans_id_o[i] = mem_q[i].sbe.trans_id;
-      end
-      if (mem_q[i].issued & mem_q[i].sbe.rd == decoded_instr_i[i].rs2) begin
-        data_trans_id_o[i] = mem_q[i].sbe.trans_id;
+always_comb begin : lsq_info
+    vaddr_trans_id_o = '0;
+    data_trans_id_o  = '0;
+
+    // check scoreboard for dependencies
+    for (int unsigned p = 0; p < CVA6Cfg.NrIssuePorts; p++) begin
+      for (int unsigned i = 0; i < CVA6Cfg.NR_SB_ENTRIES ; i++) begin
+        if (mem_q[i].issued && mem_q[i].sbe.rd == decoded_instr_i[p].rs1) begin
+          vaddr_trans_id_o[p] = mem_q[i].sbe.trans_id;
+        end
+        if (mem_q[i].issued && mem_q[i].sbe.rd == decoded_instr_i[p].rs2) begin
+          data_trans_id_o[p] = mem_q[i].sbe.trans_id;
+        end
       end
     end
 
+    // check RAW dependencies
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts ; i++) begin
-      if (decoded_instr_valid_i[i-1] & decoded_instr_i[i-1].rd == decoded_instr_i[i].rs1) begin
-        vaddr_trans_id_o = decoded_instr_i[i-1].trans_id;
+      if (decoded_instr_valid_i[i-1] && decoded_instr_i[i-1].rd == decoded_instr_i[i].rs1) begin
+        vaddr_trans_id_o[i] = decoded_instr_i[i-1].trans_id;
       end
-
-      if (decoded_instr_valid_i[i-1] & decoded_instr_i[i-1].rd == decoded_instr_i[i].rs2) begin
-        data_trans_id_o = decoded_instr_i[i-1].trans_id;
+      if (decoded_instr_valid_i[i-1] && decoded_instr_i[i-1].rd == decoded_instr_i[i].rs2) begin
+        data_trans_id_o[i] = decoded_instr_i[i-1].trans_id;
       end
     end
-  end
+end
 
   // maintain a FIFO with issued instructions
   // keep track of all issued instructions

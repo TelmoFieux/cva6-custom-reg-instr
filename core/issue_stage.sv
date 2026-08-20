@@ -475,6 +475,20 @@ module issue_stage
   scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] tree_results;
   logic [CVA6Cfg.NrIssuePorts-1:0] tree_valid;
 
+  //remove signal for the RS
+  logic [CVA6Cfg.NrIssuePorts-1:0] rm_i;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
+  fu_op [CVA6Cfg.NrIssuePorts-1:0] rm_op_i;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] rm_rd_i;
+
+  for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
+    assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j] & (!flush_unissued_instr_i && !flush_i);
+    assign rm_id_i[j] = issue_instr_sb_iro[j].global_rs_id;
+    assign rm_op_i[j] = issue_instr_sb_iro[j].op;
+    assign rm_rd_i[j] = issue_instr_sb_iro[j].rd;
+  end
+
+
 
   for (genvar i = 0; i < NR_WB; i++) begin : gen_rs_blocks
     localparam fu_phys fu = fu_phys'(i);
@@ -492,10 +506,7 @@ module issue_stage
       logic                            decoded_instr_valid_o;
       logic [CVA6Cfg.NrIssuePorts-1:0] rs_full_o;
 
-      logic [CVA6Cfg.NrIssuePorts-1:0] rm_i;
-      logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i;
-      fu_op [CVA6Cfg.NrIssuePorts-1:0] rm_op_i;
-      logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] rm_rd_i;
+
 
       for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin : g_write_enable
         case (fu)
@@ -543,13 +554,6 @@ module issue_stage
       localparam logic en_lsu = fu == LOAD_STORE;
 
       localparam logic en_csr = fu == FLU;
-
-        for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin
-          assign rm_i[j]    = issue_instr_valid_sb_iro[j] & issue_ack_iro_sb[j] & (!flush_unissued_instr_i && !flush_i);
-          assign rm_id_i[j] = issue_instr_sb_iro[j].global_rs_id;
-          assign rm_op_i[j] = issue_instr_sb_iro[j].op;
-          assign rm_rd_i[j] = issue_instr_sb_iro[j].rd;
-      end
 
       reservation_station #(
         .CVA6Cfg            (CVA6Cfg),

@@ -110,13 +110,14 @@ module store_buffer
     // there should be no commit when we are flushing
     if (commit_queue_q[commit_read_pointer_q].valid && !stall_st_pending_i) begin
       req_port_o.data_req = 1'b1;
-      sent_to_cache_o = 1'b1;
       if (req_port_i.data_gnt) begin
         // we can evict it from the commit buffer
         commit_queue_n[commit_read_pointer_q].valid = 1'b0;
         // advance the read_pointer
         commit_read_pointer_n = commit_read_pointer_q + 1'b1;
         commit_status_cnt--;
+        // handshake with lsq
+        sent_to_cache_o = 1'b1;
       end
     end
     // we ignore the rvalid signal for now as we assume that the store

@@ -32,8 +32,6 @@ module store_unit
     input logic stall_st_pending_i,
     // TO_BE_COMPLETED - TO_BE_COMPLETED
     output logic no_st_pending_o,
-    // Store instruction is valid - ISSUE_STAGE
-    input logic valid_i,
     // Data input - ISSUE_STAGE
     input lsu_ctrl_t lsu_ctrl_i,
     // Physical address - LOAD_STORE_QUEUE
