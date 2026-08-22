@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <ProcessHandle Version="1" Minor="0">
-    <Process Command="vivado" Owner="rayan" Host="rayan-HP-ProBook-445-G8-Notebook-PC" Pid="229731" HostCore="12" HostMemory="15660264">
+    <Process Command="vivado" Owner="rayan" Host="rayan-HP-ProBook-445-G8-Notebook-PC" Pid="7946" HostCore="12" HostMemory="15660264">
     </Process>
 </ProcessHandle>
 <?xml version="1.0"?>
 <ProcessHandle Version="1" Minor="0">
-    <Process Command="vivado" Owner="rayan" Host="rayan-HP-ProBook-445-G8-Notebook-PC" Pid="288354" HostCore="12" HostMemory="15660264">
+    <Process Command="vivado" Owner="rayan" Host="rayan-HP-ProBook-445-G8-Notebook-PC" Pid="66493" HostCore="12" HostMemory="15660264">
     </Process>
 </ProcessHandle>

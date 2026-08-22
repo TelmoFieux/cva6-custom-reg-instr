@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
-| Date         : Tue Jul 28 18:51:09 2026
+| Date         : Sat Aug 22 08:35:16 2026
 | Host         : rayan-HP-ProBook-445-G8-Notebook-PC running 64-bit Ubuntu 24.04.1 LTS
 | Command      : report_timing_summary -max_paths 10 -routable_nets -report_unconstrained -file cva6_zybo_z7_20_timing_summary_routed.rpt -pb cva6_zybo_z7_20_timing_summary_routed.pb -rpx cva6_zybo_z7_20_timing_summary_routed.rpx -warn_on_violation
 | Design       : cva6_zybo_z7_20

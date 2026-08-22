@@ -56,7 +56,7 @@ if {$::dispatch::connected} {
 }
 
 OPTRACE "synth_1" START { ROLLUP_AUTO }
-set_param synth.incrementalSynthesisCache ./.Xil/Vivado-228018-rayan-HP-ProBook-445-G8-Notebook-PC/incrSyn
+set_param synth.incrementalSynthesisCache ./.Xil/Vivado-5889-rayan-HP-ProBook-445-G8-Notebook-PC/incrSyn
 set_param checkpoint.writeSynthRtdsInDcp 1
 set_param general.usePosixSpawnForFork 1
 set_msg_config -id {Synth 8-256} -limit 10000
