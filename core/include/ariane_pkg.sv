@@ -535,9 +535,9 @@ package ariane_pkg;
   // Returns the size of each RS
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
-      FLU:  return 4;
+      FLU:  return 3;
       LOAD_STORE: return 4;
-      FPU_ALU2: return 4;
+      FPU_ALU2: return 3;
       F_CVXIF: return 4;
       default: begin
         // pragma translate_off

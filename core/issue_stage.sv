@@ -77,27 +77,24 @@ module issue_stage
     // Signaling that we resolved the branch - EX_STAGE
     input logic resolve_branch_i,
 
-    // FU data sent directly to lsq - LOAD_STORE_QUEUE
-    output fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_o,
     // Instr to write to the load queue - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_o,
     // Instr to write to the store queue - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.NrIssuePorts-1:0] st_we_o,
     // trans id of the producer needed by a store - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id_o,
     // trans id of the producer needed by a store or load - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id_o,
     // data sent by issue stage is already valid - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_o,
     // vaddr sent by issue stage is already valid - LOAD_STORE_QUEUE
     output logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_o,
     // LSQ is full - LOAD_STORE_QUEUE
     input logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_i,
-    // Transformed trap instruction - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0][31:0] lsq_tinst_o,
-
-    // Load store unit FU is ready - EX_STAGE
-    input logic lsu_ready_i,
+    // Number of entry freed in the store queue - LOAD_STORE_QUEUE
+    input logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_i,
+    // Number of entry freed in the load queue - LOAD_STORE_QUEUE
+    input logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_i,
     // Load store unit FU is valid - EX_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_o,
     // Mult FU is valid - EX_STAGE
@@ -463,8 +460,11 @@ module issue_stage
 
   localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
 
+  logic [CVA6Cfg.NrIssuePorts-1:0] lsq_bypass_full;
+  logic [CVA6Cfg.NrIssuePorts-1:0] lsq_bypass_we;
+
   logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rollback_id_o;
-  fu_op                               wb_op_o;
+  fu_op [CVA6Cfg.NrWbPorts-1:0]       wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
 
   scoreboard_entry_t [NR_WB-1:0] rs_results;
@@ -502,7 +502,7 @@ module issue_stage
     if (is_rs_instanciated) begin : rs_instance
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
 
-      scoreboard_entry_t decoded_instr_o;
+      scoreboard_entry_t               decoded_instr_o;
       logic                            decoded_instr_valid_o;
       logic [CVA6Cfg.NrIssuePorts-1:0] rs_full_o;
 
@@ -615,39 +615,194 @@ module issue_stage
   end
 
 
-  logic [CVA6Cfg.NrIssuePorts:0][NR_WB-1:0]         tournament_valid_masked;
-  logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
-  logic [NR_WB-1:0][$clog2(NR_WB)-1:0]              tournament_id;
+  // ---------------------------------------------------------
+  // 3. Manage Load Store Queue signals
+  // ---------------------------------------------------------
 
-  assign tournament_valid_masked [0] = rs_valid;
+  typedef struct packed {
+    logic vaddr_valid;
+    logic data_valid;
+    logic [CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id;
+    logic [CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id;
+  } lsq_data_t;
 
-  for (genvar i = 0 ; i < NR_WB ; i++) begin
-    assign tournament_seq_num[i] = rs_global_id[i];
+  localparam int TOKEN_W = $clog2(CVA6Cfg.NrLSQEntries + 1);
+
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id, vaddr_trans_id;
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]               lsq_dispatch_instr;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_dispatch_instr_valid;
+  lsq_data_t [CVA6Cfg.NrIssuePorts-1:0]                       lsq_dispatch_instr_data;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_tournament_valid;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_token_valid, st_token_valid;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_we, st_we;
+
+  logic [TOKEN_W-1:0] ld_token_n, ld_token_q;
+  logic [TOKEN_W-1:0] st_token_n, st_token_q;
+
+
+
+  for (genvar i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
+    assign ld_we[i] = issue_instr_sb_iro[i].fu == LOAD & rm_i[i];
+    assign st_we[i] = issue_instr_sb_iro[i].fu == STORE & rm_i[i];
+    assign lsq_bypass_we[i] = (decoded_instr_i[i].fu == STORE || decoded_instr_i[i].fu == LOAD) & decoded_instr_valid_i[i];
+  end
+
+  always_comb begin
+    lsq_tournament_valid[0] = lsq_dispatch_instr[0].fu == LOAD ? ld_token_valid[0] & lsq_dispatch_instr_valid[0]
+      : st_token_valid[0] & lsq_dispatch_instr_valid[0];
+    for (int unsigned i = 1; i< CVA6Cfg.NrIssuePorts; i++ ) begin
+      lsq_tournament_valid[i] = (lsq_dispatch_instr[i].fu == LOAD ? ld_token_valid[i] & lsq_dispatch_instr_valid[i]
+      : st_token_valid[i] & lsq_dispatch_instr_valid[i]) & lsq_tournament_valid[i-1];
+    end
+  end
+
+
+
+  always_comb begin : lsq_write_enable
+
+    automatic logic [TOKEN_W-1:0] ld_token, ld_speculative_token;
+    automatic logic [TOKEN_W-1:0] st_token, st_speculative_token;
+
+    ld_token = ld_token_q;
+    st_token = st_token_q;
+
+    ld_token_valid = '0;
+    st_token_valid = '0;
+
+    // works for default behavior as well as flushes and rollback
+    st_token = st_token + st_return_token_i;
+    ld_token = ld_token + ld_return_token_i;
+
+    ld_speculative_token = ld_token_q;
+    st_speculative_token = st_token_q;
+
+    for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
+      if (ld_speculative_token > 0 & lsq_dispatch_instr_valid[i] & lsq_dispatch_instr[i].fu == LOAD) begin
+        ld_token_valid[i] = 1'b1;
+        ld_speculative_token = ld_speculative_token - 1'b1;
+      end else if (st_speculative_token > 0 & lsq_dispatch_instr_valid[i] & lsq_dispatch_instr[i].fu == STORE) begin
+        st_token_valid[i] = 1'b1;
+        st_speculative_token = st_speculative_token - 1'b1;
+      end
+    end
+
+    for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
+      if (rm_i[i] & issue_instr_sb_iro[i].fu == LOAD) begin
+        ld_token = ld_token - 1'b1;
+      end else if (rm_i[i] & issue_instr_sb_iro[i].fu == STORE) begin
+        st_token = st_token - 1'b1;
+      end
+    end
+
+    ld_token_n = ld_token;
+    st_token_n = st_token;
+
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      ld_token_q <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+      st_token_q <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+    end else if (flush_i) begin
+      ld_token_q <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+      st_token_q <= st_token_n;
+    end else begin
+      ld_token_q <= ld_token_n;
+      st_token_q <= st_token_n;
+    end
+  end
+
+  lsq_bypass #(
+    .CVA6Cfg            (CVA6Cfg),
+    .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
+    .FPR_ENABLED        (CVA6Cfg.FpPresent),
+    .NR_ENTRIES         (CVA6Cfg.NrLSQBypassEntries),
+    .FALLTHROUGH        (1'b0),
+    .scoreboard_entry_t (scoreboard_entry_t),
+    .lsq_data_t (lsq_data_t)
+  ) i_lsq_bypass (
+    .clk_i                      (clk_i),
+    .rst_ni                     (rst_ni),
+    .flush_i                    (flush_i),
+    .full_o                     (lsq_bypass_full),
+    .rm_i                       (rm_i),
+    .rm_id_i                    (rm_id_i),
+    .rm_op_i                    (rm_op_i),
+    .rm_rd_i                    (rm_rd_i),
+    .wb_valid_i                 (wb_valid_o),
+    .wb_rd_i                    (wbaddr_o),
+    .wb_op_i                    (wb_op_o),
+    .rollback_en_i              (rollback_we_i),
+    .rollback_op_i              (rollback_op_i),
+    .rollback_rd_i              (rollback_rd_i),
+    .rollback_id_i              (rollback_id_o),
+    .dispatch_instr_o           (lsq_dispatch_instr),
+    .dispatch_instr_valid_o     (lsq_dispatch_instr_valid),
+    .dispatch_instr_data_o      (lsq_dispatch_instr_data),
+    .vaddr_trans_id_i           (vaddr_trans_id),
+    .data_trans_id_i            (data_trans_id),
+    .decoded_instr_i            (renamed_instr_i),
+    .decoded_instr_ack_i        (decoded_instr_ack_o),
+    .decoded_instr_valid_i      (decoded_instr_valid_i)
+  );
+
+  // ---------------------------------------------------------
+  // 4. Final tournament tree to select instr to dispatch
+  // ---------------------------------------------------------
+
+  // size takes into account rs and instr from lsq_bypass
+  localparam TOURNAMENT_SIZE = NR_WB+CVA6Cfg.NrIssuePorts;
+
+  logic              [TOURNAMENT_SIZE-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
+  logic              [TOURNAMENT_SIZE-1:0][$clog2(TOURNAMENT_SIZE)-1:0]    tournament_id;
+  scoreboard_entry_t [TOURNAMENT_SIZE-1:0]                                 tournament_candidates;
+
+  lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] tree_lsq_data;
+  lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] issue_lsq_data;
+
+  assign tournament_candidates = {lsq_dispatch_instr, rs_results};
+
+  for (genvar i = 0 ; i < TOURNAMENT_SIZE ; i++) begin
+    if (i < NR_WB) begin
+      assign tournament_seq_num[i] = rs_global_id[i];
+    end else begin
+      assign tournament_seq_num[i] = lsq_dispatch_instr[i-NR_WB].global_rs_id;
+    end
     assign tournament_id[i] = i;
   end
 
-  //cascade of tournament_tree in order to extract 2 instructions to issue
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_alloc
-    logic [$clog2(NR_WB)-1:0] winner_o;
-    logic winner_valid_o;
 
-    tournament_tree #(
-        .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
-        .NR_PLAYER(NR_WB)
-      ) i_tournament_tree (
-        .valid_i    (tournament_valid_masked[i]),
-        .seq_num_i  (tournament_seq_num),
-        .id_i       (tournament_id),
-        .winner_o   (winner_o),
-        .winner_valid_o (winner_valid_o)
-    );
+  logic [1:0][$clog2(TOURNAMENT_SIZE)-1:0] winner;
+  logic [1:0] winner_valid;
 
-    assign tree_results[i] = rs_results[winner_o];
-    assign tree_valid[i] = winner_valid_o & (!rollback_active_o);
+  tournament_tree_top2 #(
+      .ID_SIZE   (CVA6Cfg.GlobalRsIdWidth),
+      .NR_PLAYER (TOURNAMENT_SIZE)
+  ) i_global_tournament_tree (
+      .valid_i          ({lsq_tournament_valid, rs_valid}),
+      .seq_num_i        (tournament_seq_num),
+      .id_i             (tournament_id),
+      .winner_o         (winner),
+      .winner_valid_o   (winner_valid)
+  );
 
-    assign tournament_valid_masked[i+1] = tournament_valid_masked[i] & ~(NR_WB'(1) << winner_o);
 
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+    assign tree_results[i] = tournament_candidates[winner[i]];
+    assign tree_valid[i] = winner_valid[i] && !rollback_active_o;
   end
+
+
+  always_comb begin
+    tree_lsq_data = '0;
+
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (winner_valid[i] && winner[i] >= NR_WB) begin
+        tree_lsq_data[i] = lsq_dispatch_instr_data[winner[i] - NR_WB];
+      end
+    end
+  end
+
 
   //Finally we reorder instruction for 2 reasons
   //1. issue port 2 cannot execute CSR or CVXIF operations
@@ -655,32 +810,37 @@ module issue_stage
   // and it must be issued strictly in order
 
   always_comb begin : issue_valid
+
+    issue_lsq_data = '0;
+
     if (tree_results[0].fu == CSR || tree_results[1].fu == CSR) begin
       issue_instr_sb_iro[0] = tree_results[0];
       issue_instr_sb_iro[1] = '0;
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = 1'b0;
+      issue_lsq_data[0] = tree_lsq_data[0];
     end else if (tree_results[1].fu == CVXIF) begin
       issue_instr_sb_iro[0] = tree_results[1];
       issue_instr_sb_iro[1] = tree_results[0];
       issue_instr_valid_sb_iro[0] = tree_valid[1];
       issue_instr_valid_sb_iro[1] = tree_valid[0];
+      issue_lsq_data[0] = tree_lsq_data[1];
+      issue_lsq_data[1] = tree_lsq_data[0];
     end else begin
-      issue_instr_sb_iro[0] = tree_results[0];
-      issue_instr_sb_iro[1] = tree_results[1];
-      issue_instr_valid_sb_iro[0] = tree_valid[0];
-      issue_instr_valid_sb_iro[1] = tree_valid[1];
+      issue_instr_sb_iro = tree_results;
+      issue_instr_valid_sb_iro = tree_valid;
+      issue_lsq_data = tree_lsq_data;
     end
   end
 
   always_comb begin : instr_ack_update
     //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
     decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ?
-        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || ((ld_we_o[0] | st_we_o[0]) & lsq_full_i[0])) ? 1'b0 :
+        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || (lsq_bypass_we[0] & lsq_bypass_full[0])) ? 1'b0 :
       (issue_instr_ack[0] && !final_rs_full[0])) : 1'b0;
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
       decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ?
-          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || ((ld_we_o[i] | st_we_o[i]) & lsq_full_i[i])) ? 1'b0 :
+          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || (lsq_bypass_we[i] & lsq_bypass_full[i])) ? 1'b0 :
         (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1])) : 1'b0;
     end
   end
@@ -693,42 +853,12 @@ module issue_stage
     end
   end
 
-  // ---------------------------------------------------------
-  // 3. Manage Load Store Queue signals
-  // ---------------------------------------------------------
-
-  for (genvar i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin : lsq_write_enable
-    assign ld_we_o[i] = decoded_instr_i[i].fu == LOAD;
-    assign st_we_o[i] = decoded_instr_i[i].fu == STORE;
-  end
-
-  lsq_bypass #(
-    .CVA6Cfg            (CVA6Cfg),
-    .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
-    .FPR_ENABLED        (CVA6Cfg.FpPresent),
-    .scoreboard_entry_t (scoreboard_entry_t)
-  ) i_lsq_bypass (
-    .clk_i                      (clk_i),
-    .rst_ni                     (rst_ni),
-    .rm_i                       (rm_i),
-    .rm_op_i                    (rm_op_i),
-    .rm_rd_i                    (rm_rd_i),
-    .wb_valid_i                 (wb_valid_o),
-    .wb_rd_i                    (wbaddr_o),
-    .wb_op_i                    (wb_op_o),
-    .rollback_en_i              (rollback_we_i),
-    .rollback_op_i              (rollback_op_i),
-    .rollback_rd_i              (rollback_rd_i),
-    .rs_restore_en_i            (flush_i),
-    .st_data_valid_o            (st_data_valid_o),
-    .vaddr_valid_o              (vaddr_valid_o),
-    .decoded_instr_i            (renamed_instr_i),
-    .decoded_instr_ack_i        (decoded_instr_ack_o)
-  );
 
   // ---------------------------------------------------------
-  // 4. Manage instructions in a scoreboard
+  // 5. Manage instructions in a scoreboard
   // ---------------------------------------------------------
+
+
   scoreboard #(
       .CVA6Cfg   (CVA6Cfg),
       .rs3_len_t (rs3_len_t),
@@ -751,8 +881,8 @@ module issue_stage
       .commit_drop_o,
       .commit_ack_i,
       .decoded_instr_i         (renamed_instr_i),
-      .data_trans_id_o         (data_trans_id_o),
-      .vaddr_trans_id_o        (vaddr_trans_id_o),
+      .data_trans_id_o         (data_trans_id),
+      .vaddr_trans_id_o        (vaddr_trans_id),
       .orig_instr_i,
       .decoded_instr_valid_i   (decoded_instr_valid_i),
       .decoded_instr_ack_i     (decoded_instr_ack_o),
@@ -798,6 +928,7 @@ module issue_stage
       .CVA6Cfg(CVA6Cfg),
       .branchpredict_sbe_t(branchpredict_sbe_t),
       .fu_data_t(fu_data_t),
+      .lsq_data_t (lsq_data_t),
       .scoreboard_entry_t(scoreboard_entry_t),
       .rs3_len_t(rs3_len_t),
       .writeback_t(writeback_t),
@@ -812,13 +943,11 @@ module issue_stage
       .flush_i                 (flush_unissued_instr_i),
       .stall_i,
       .issue_instr_i           (issue_instr_sb_iro),
-      .lsq_instr_i             (renamed_instr_i),
       .issue_instr_i_prev      (decoded_instr_i_prev),
       .orig_instr_i            (orig_instr_sb_iro),
       .issue_instr_valid_i     (issue_instr_valid_sb_iro),
       .issue_ack_o             (issue_ack_iro_sb),
       .fu_data_o               (fu_data_o),
-      .lsq_fu_data_o           (lsq_fu_data_o),
       .rs1_forwarding_o        (rs1_forwarding_o),
       .rs2_forwarding_o        (rs2_forwarding_o),
       .pc_o,
@@ -828,9 +957,16 @@ module issue_stage
       .alu_valid_o             (alu_valid_o),
       .branch_valid_o          (branch_valid_o),
       .tinst_o                 (tinst_o),
-      .lsq_tinst_o             (lsq_tinst_o),
       .branch_predict_o,
-      .lsu_ready_i,
+      .ld_we_i                 (ld_we),
+      .st_we_i                 (st_we),
+      .lsq_data_i              (issue_lsq_data),
+      .ld_we_o,
+      .st_we_o,
+      .data_trans_id_o,
+      .vaddr_trans_id_o,
+      .vaddr_valid_o,
+      .st_data_valid_o,
       .lsu_valid_o,
       .mult_valid_o,
       .fpu_ready_i,

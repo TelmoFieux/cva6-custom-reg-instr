@@ -121,8 +121,8 @@ report_clock_interaction                                                -file re
 set_property "steps.place_design.args.directive" "ExtraTimingOpt" [get_runs impl_1]
 set_property "steps.route_design.args.directive" "Explore" [get_runs impl_1]
 
-set_property "steps.post_route_phys_opt_design.is_enabled" "1" [get_runs impl_1]
-set_property "steps.post_route_phys_opt_design.args.directive" "Explore" [get_runs impl_1]
+# set_property "steps.post_route_phys_opt_design.is_enabled" "1" [get_runs impl_1]
+# set_property "steps.post_route_phys_opt_design.args.directive" "Explore" [get_runs impl_1]
 
 set_property "steps.phys_opt_design.is_enabled" "1" [get_runs impl_1]
 # set_property "steps.phys_opt_design.args.directive" "Explore" [get_runs impl_1]

@@ -74,6 +74,21 @@ module instr_tracer #(
   // contains mappings of the form vaddr <-> paddr
   logic [63:0] store_mapping[$], load_mapping[$], address_mapping;
 
+  // Questa/vopt workaround:
+  // specialize the parameterized trace classes once at module scope.
+  // Local function declarations then use simple typedef names and contain no "#(...)".
+  typedef instr_trace_item #(
+    .CVA6Cfg(CVA6Cfg),
+    .bp_resolve_t(bp_resolve_t),
+    .scoreboard_entry_t(scoreboard_entry_t)
+  ) instr_trace_item_t;
+
+  typedef ex_trace_item #(
+    .CVA6Cfg(CVA6Cfg),
+    .interrupts_t(interrupts_t),
+    .INTERRUPTS(INTERRUPTS)
+  ) ex_trace_item_t;
+
   // static uvm_cmdline_processor uvcl = uvm_cmdline_processor::get_inst();
 
   function void create_file(logic [63:0] hart_id);
@@ -175,6 +190,17 @@ module instr_tracer #(
       if (commit_exception.valid && !(debug_mode && commit_exception.cause == riscv::BREAKPOINT)) begin
         // print exception
         printException(commit_instr[0].pc, commit_exception.cause, commit_exception.tval);
+        $display(
+          "[EXCEPTION] time=%0t cycle=%0d pc=%h cause=%0d tval=%h fu=%0d op=%0d tid=%0d",
+          $time,
+          clk_ticks,
+          commit_instr[0].pc,
+          commit_exception.cause,
+          commit_exception.tval,
+          commit_instr[0].fu,
+          commit_instr[0].op,
+          commit_instr[0].trans_id
+        );
       end
       // ----------------------
       // Commit Registers
@@ -220,21 +246,15 @@ module instr_tracer #(
   endfunction
 
   function automatic void printInstr(
-      scoreboard_entry_t sbe,
-      logic [31:0] instr,
-      logic [63:0] result,
-      logic [CVA6Cfg.PLEN-1:0] paddr,
-      riscv::priv_lvl_t priv_lvl,
-      logic debug_mode,
-      bp_resolve_t bp
+    scoreboard_entry_t sbe,
+    logic [31:0] instr,
+    logic [63:0] result,
+    logic [CVA6Cfg.PLEN-1:0] paddr,
+    riscv::priv_lvl_t priv_lvl,
+    logic debug_mode,
+    bp_resolve_t bp
   );
-
-    instr_trace_item #(
-      .CVA6Cfg(CVA6Cfg),
-      .bp_resolve_t(bp_resolve_t),
-      .scoreboard_entry_t(scoreboard_entry_t)
-    ) iti;
-
+    instr_trace_item_t iti;
     string print_instr;
 
     iti = new(
@@ -271,23 +291,17 @@ module instr_tracer #(
   endfunction
 
   function automatic void printException(
-        logic [CVA6Cfg.VLEN-1:0] pc,
-        logic [63:0] cause,
-        logic [63:0] tval
-    );
+    logic [CVA6Cfg.VLEN-1:0] pc,
+    logic [63:0] cause,
+    logic [63:0] tval
+  );
+    ex_trace_item_t eti;
+    string print_ex;
 
-      ex_trace_item #(
-        .CVA6Cfg(CVA6Cfg),
-        .interrupts_t(interrupts_t),
-        .INTERRUPTS(INTERRUPTS)
-      ) eti;
+    eti = new(pc, cause, tval);
+    print_ex = eti.printException();
 
-      string print_ex;
-
-      eti = new(pc, cause, tval);
-      print_ex = eti.printException();
-
-      $fwrite(f, {print_ex, "\n"});
+    $fwrite(f, {print_ex, "\n"});
   endfunction
 
   function void close();

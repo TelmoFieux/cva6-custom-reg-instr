@@ -159,6 +159,8 @@ package config_pkg;
     int unsigned                 RollbackWidth;
     // Size of load and store queue
     int unsigned                 NrLSQEntries;
+    // Size of lsq bypass buffer
+    int unsigned                 NrLSQBypassEntries;
     // AXI User width
     int unsigned                 AxiUserWidth;
     // AXI burst in write
@@ -261,6 +263,7 @@ package config_pkg;
     int unsigned GlobalRsIdWidth;
     int unsigned RollbackWidth;
     int unsigned NrLSQEntries;
+    int unsigned NrLSQBypassEntries;
     int unsigned MEM_TID_WIDTH;
     int unsigned NrLoadBufEntries;
     bit          RVF;

@@ -56,6 +56,8 @@ module commit_stage
     output logic [CVA6Cfg.XLEN-1:0] csr_rdata_o,
     // Register file write enable - ISSUE_STAGE
     output logic csr_we_o,
+    // csr trans id - EX_STAGE
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0] csr_trans_id_o,
     // Result of AMO operation - CACHE
     input amo_resp_t amo_resp_i,
     // TO_BE_COMPLETED - FRONTEND_CSR_REGFILE
@@ -208,6 +210,7 @@ module commit_stage
           // write the CSR file
           csr_we_o = 1'b1;
           csr_op_o    = commit_instr_i[0].op;
+          csr_trans_id_o = commit_instr_i[0].trans_id;
           csr_wdata_o = commit_instr_i[0].result;
           csr_waddr_o = commit_instr_i[0].rd;
           if (!commit_drop_i[0]) begin

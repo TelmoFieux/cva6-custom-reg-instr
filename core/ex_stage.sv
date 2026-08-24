@@ -49,8 +49,6 @@ module ex_stage
     input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.VLEN-1:0] rs2_forwarding_i,
     // FU data useful to execute instruction - ISSUE_STAGE
     input fu_data_t [CVA6Cfg.NrIssuePorts-1:0] fu_data_i,
-    // FU data sent directly to lsq - ISSUE_STAGE
-    input fu_data_t [CVA6Cfg.NrIssuePorts-1:0] lsq_fu_data_i,
     // PC of the current instruction - ISSUE_STAGE
     input logic [CVA6Cfg.VLEN-1:0] pc_i,
     // Is_zcmt instruction - ISSUE_STAGE
@@ -91,22 +89,30 @@ module ex_stage
     input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_i,
     // Handshake between issue and decode stage - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
+    // Register file write enable - COMMIT_STAGE
+    input logic csr_we_i,
+    // csr read data - COMMIT_STAGE
+    input logic [CVA6Cfg.XLEN-1:0] csr_rdata_i,
+    // csr trans_id - COMMIT_STAGE
+    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] csr_trans_id_i,
     // Instr to write to the load queue - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_i,
     // Instr to write to the store queue - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] st_we_i,
     // trans id of the producer needed by a store - ISSUE_STAGE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id_i,
     // trans id of the producer needed by a store or load - ISSUE_STAGE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_i,
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id_i,
     // data sent by issue stage is already valid - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0]                           st_data_valid_i,
     // vaddr sent by issue stage is already valid - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_i,
-    // Transformed trap instruction - LOAD_STORE_QUEUE
-    input logic [CVA6Cfg.NrIssuePorts-1:0][31:0]                    lsq_tinst_i,
     // LSQ is full - ISSUE_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_o,
+    // number of store queue entrie freed this cycle - ISSUE_STAGE
+    output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_o,
+    // number of store queue entrie freed this cycle - ISSUE_STAGE
+    output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_o,
     // Load result is valid - ISSUE_STAGE
     output logic load_valid_o,
     // Load result valid - ISSUE_STAGE
@@ -550,9 +556,9 @@ module ex_stage
   logic [CVA6Cfg.NrWbPorts-1:0] wt_valid;
 
   //assembling wb_data just like in the cva6 file
-  assign wb_trans_id[FLU_WB] = flu_trans_id_o;
-  assign wbdata[FLU_WB]   = flu_result_o;
-  assign wt_valid[FLU_WB] = flu_valid_o;
+  assign wb_trans_id[FLU_WB] = csr_we_i ? csr_trans_id_i : flu_trans_id_o;
+  assign wbdata[FLU_WB]   = csr_we_i ? csr_rdata_i : flu_result_o;
+  assign wt_valid[FLU_WB] = csr_we_i || flu_valid_o;
 
   assign wb_trans_id[STORE_WB] = '0;
   assign wbdata[STORE_WB]   = '0;
@@ -590,8 +596,10 @@ module ex_stage
       .flush_i,
       .stall_st_pending_i,
       .no_st_pending_o,
-      .fu_data_i               (lsq_fu_data_i),
+      .fu_data_i,
       .lsq_full_o,
+      .st_return_token_o,
+      .ld_return_token_o,
       .decoded_instr_valid_i,
       .decoded_instr_ack_i,
       .ld_we_i,
@@ -659,7 +667,7 @@ module ex_stage
       .amo_valid_commit_i,
       .amo_req_o,
       .amo_resp_i,
-      .tinst_i               (lsq_tinst_i),
+      .tinst_i,
       .pmpcfg_i,
       .pmpaddr_i,
       .rvfi_lsu_ctrl_o,

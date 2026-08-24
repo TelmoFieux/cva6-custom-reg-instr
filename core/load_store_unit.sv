@@ -49,7 +49,10 @@ module load_store_unit
     input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_valid_i,
     // Load Store Unit instruction is accepted - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
-
+    // number of store queue entrie freed this cycle - ISSUE_STAGE
+    output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_o,
+    // number of load queue entrie freed this cycle - ISSUE_STAGE
+    output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_o,
     // Instr to write to the load queue - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_i,
     // Instr to write to the store queue - ISSUE_STAGE
@@ -68,7 +71,7 @@ module load_store_unit
     // Destination register in register file - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]    wb_trans_id_i,
     // Results to write back - EX_STAGE
-    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1-1:0]          wbdata_i,
+    input logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0]            wbdata_i,
     // Indicates valid results - EX_STAGE
     input logic [CVA6Cfg.NrWbPorts-1:0]                              wt_valid_i,
 
@@ -209,6 +212,7 @@ module load_store_unit
 
 
   logic                    st_valid_i;
+  logic                    no_st_pending;
   logic                    ld_valid_i;
   logic [CVA6Cfg.VLEN-1:0] lsq_vaddr;
   logic [            31:0] lsq_tinst;
@@ -217,7 +221,7 @@ module load_store_unit
   logic                    translation_req, lsq_translation_req;
   logic                    translation_valid;
 
-  logic [CVA6Cfg.NrLSQEntries-1:0] ld_lsq_idx_o, ld_lsq_idx_i;
+  logic [$clog2(CVA6Cfg.NrLSQEntries)-1:0] ld_lsq_idx_o, ld_lsq_idx_i;
 
 
 
@@ -248,6 +252,13 @@ module load_store_unit
   exception_t                               misaligned_exception;
   exception_t                               ld_ex;
   exception_t                               st_ex;
+
+  logic                                     st_translation_req;
+  logic [CVA6Cfg.VLEN-1:0]                  pmp_lsu_vaddr;
+  logic                                     pmp_lsu_is_store;
+
+  logic [CVA6Cfg.VLEN-1:0]                  no_mmu_vaddr_q;
+  logic                                     no_mmu_is_store_q;
 
 
   logic [1:0] sum, mxr;
@@ -338,23 +349,36 @@ module load_store_unit
       assign pmp_icache_areq_i.fetch_paddr = CVA6Cfg.PLEN'(icache_areq_i.fetch_vaddr);
     end
     assign pmp_icache_areq_i.fetch_exception = 'h0;
+
     // dcache request without mmu for load or store,
     // Delay of 1 cycle to match MMU latency giving the address tag
     always_ff @(posedge clk_i or negedge rst_ni) begin
       if (~rst_ni) begin
-        lsu_paddr <= '0;
-        pmp_exception <= '0;
+        lsu_paddr             <= '0;
+        pmp_exception         <= '0;
         pmp_translation_valid <= 1'b0;
+
+        no_mmu_vaddr_q        <= '0;
+        no_mmu_is_store_q     <= 1'b0;
       end else begin
+
         if (CVA6Cfg.VLEN >= CVA6Cfg.PLEN) begin : gen_virtual_physical_address_lsu
           lsu_paddr <= mmu_vaddr[CVA6Cfg.PLEN-1:0];
         end else begin
           lsu_paddr <= CVA6Cfg.PLEN'(mmu_vaddr);
         end
-        pmp_exception <= misaligned_exception;
+
+        pmp_exception         <= misaligned_exception;
         pmp_translation_valid <= translation_req;
+
+        // Metadata belonging to exactly the same request
+        no_mmu_vaddr_q        <= mmu_vaddr;
+        no_mmu_is_store_q     <= st_translation_req;
       end
     end
+
+    assign pmp_lsu_vaddr = CVA6Cfg.MmuPresent ? mmu_vaddr : no_mmu_vaddr_q;
+    assign pmp_lsu_is_store = CVA6Cfg.MmuPresent ? st_translation_req : no_mmu_is_store_q;
 
     // dcache interface of PTW not used
     assign dcache_req_ports_o[0].address_index = '0;
@@ -392,9 +416,9 @@ module load_store_unit
       .icache_fetch_vaddr_i(icache_areq_i.fetch_vaddr),
       .lsu_valid_i         (pmp_translation_valid),
       .lsu_paddr_i         (lsu_paddr),
-      .lsu_vaddr_i         (mmu_vaddr),
+      .lsu_vaddr_i         (pmp_lsu_vaddr),
       .lsu_exception_i     (pmp_exception),
-      .lsu_is_store_i      (st_translation_req),
+      .lsu_is_store_i      (pmp_lsu_is_store),
       .lsu_valid_o         (translation_valid),
       .lsu_paddr_o         (mmu_paddr),
       .lsu_exception_o     (mmu_exception),
@@ -407,6 +431,7 @@ module load_store_unit
   );
 
 
+  assign no_st_pending_o = no_st_pending;
   logic store_buffer_empty;
   // ------------------
   // Store Unit
@@ -422,7 +447,7 @@ module load_store_unit
       .rst_ni,
       .flush_i,
       .stall_st_pending_i,
-      .no_st_pending_o,
+      .no_st_pending_o  (no_st_pending),
       .st_valid_i   (st_valid_i),
       .lsu_ctrl_i(st_lsq_ctrl),
       .paddr_i  (st_lsq_paddr),
@@ -718,7 +743,10 @@ module load_store_unit
     .st_buf_lsu_ctrl_o   (st_lsq_ctrl),
     .st_buf_valid_o      (st_valid_i),
     .st_buf_paddr_o      (st_lsq_paddr),
+    .no_st_pending_i     (no_st_pending),
     .st_sent_to_cache_i  (st_sent_to_cache),
+    .st_return_token_o   (st_return_token_o),
+    .ld_return_token_o   (ld_return_token_o),
 
     //Load unit
     .ldbuf_full_i       (ldbuf_full),
@@ -760,7 +788,7 @@ module load_store_unit
     $sampled(lsu_paddr),
     $sampled(pmp_translation_valid)
   );
-  // pragma translate off
+  // pragma translate on
 
 endmodule
 

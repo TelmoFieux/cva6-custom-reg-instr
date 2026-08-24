@@ -93,9 +93,9 @@ module scoreboard
     // we enable for fpr register - ISSUE_READ_OPERANDS
     output logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o,
         // trans id of the producer needed by a store - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] data_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id_o,
     // trans id of the producer needed by a store or load - LOAD_STORE_QUEUE
-    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.RegAddrWidth-1:0] vaddr_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id_o,
 
 
 

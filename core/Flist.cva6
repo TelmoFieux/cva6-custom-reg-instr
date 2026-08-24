@@ -138,6 +138,7 @@ ${CVA6_REPO_DIR}/core/reservation_station.sv
 ${CVA6_REPO_DIR}/core/load_store_queue.sv
 ${CVA6_REPO_DIR}/core/lsq_bypass.sv
 ${CVA6_REPO_DIR}/core/tournament_tree.sv
+${CVA6_REPO_DIR}/core/tournament_tree_top2.sv
 ${CVA6_REPO_DIR}/core/store_buffer.sv
 ${CVA6_REPO_DIR}/core/amo_buffer.sv
 ${CVA6_REPO_DIR}/core/store_unit.sv

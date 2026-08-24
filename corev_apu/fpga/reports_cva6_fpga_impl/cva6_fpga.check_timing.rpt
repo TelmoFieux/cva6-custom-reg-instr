@@ -1,0 +1,316 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2024.1 (lin64) Build 5076996 Wed May 22 18:36:09 MDT 2024
+| Date         : Mon Aug 24 16:15:40 2026
+| Host         : telmo-HYM-WXX running 64-bit Ubuntu 20.04.6 LTS
+| Command      : check_timing -file reports_cva6_fpga_impl/cva6_fpga.check_timing.rpt
+| Design       : cva6_zybo_z7_20
+| Device       : 7z020-clg400
+| Speed File   : -1  PRODUCTION 1.12 2019-11-22
+| Design State : Routed
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+
+check_timing report
+
+Table of Contents
+-----------------
+1. checking no_clock (440)
+2. checking constant_clock (0)
+3. checking pulse_width_clock (0)
+4. checking unconstrained_internal_endpoints (4)
+5. checking no_input_delay (2)
+6. checking no_output_delay (1)
+7. checking multiple_clock (0)
+8. checking generated_clocks (0)
+9. checking loops (0)
+10. checking partial_input_delay (3)
+11. checking partial_output_delay (0)
+12. checking latch_loops (0)
+
+1. checking no_clock (440)
+--------------------------
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/csr_regfile_i/wfi_q_reg/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/FSM_sequential_state_q_reg/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/bmiss_trans_id_q_reg[0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/bmiss_trans_id_q_reg[1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/bmiss_trans_id_q_reg[2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/bmiss_trans_id_q_reg[3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][0]_rep__0/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][0]_rep__4/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][1]_rep/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][1]_rep__2/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][1]_rep__3/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][2]_rep/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][2]_rep__0/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/commit_pointer_q_reg[0][3]_rep/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[0][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[10][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[10][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[10][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[10][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[10][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[10][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[11][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[11][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[11][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[11][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[11][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[11][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[12][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[12][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[12][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[12][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[12][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[12][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[13][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[13][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[13][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[13][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[13][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[13][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[14][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[14][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[14][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[14][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[14][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[14][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[15][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[15][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[15][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[15][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[15][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[15][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[1][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[1][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[1][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[1][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[1][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[1][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[2][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[2][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[2][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[2][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[2][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[2][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[3][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[3][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[3][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[3][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[3][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[3][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[4][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[4][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[4][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[4][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[4][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[4][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[5][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[5][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[5][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[5][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[5][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[5][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[6][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[6][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[6][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[6][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[6][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[6][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[7][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[7][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[7][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[7][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[7][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[7][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[8][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[8][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[8][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[8][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[8][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[8][sbe][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[9][sbe][ex][valid]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[9][sbe][fu][0]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[9][sbe][fu][1]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[9][sbe][fu][2]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[9][sbe][fu][3]/Q (HIGH)
+
+ There are 4 register/latch pins with no clock driven by root clock pin: i_ariane/i_cva6/issue_stage_i/i_scoreboard/mem_q_reg[9][sbe][valid]/Q (HIGH)
+
+
+2. checking constant_clock (0)
+------------------------------
+ There are 0 register/latch pins with constant_clock.
+
+
+3. checking pulse_width_clock (0)
+---------------------------------
+ There are 0 register/latch pins which need pulse_width check
+
+
+4. checking unconstrained_internal_endpoints (4)
+------------------------------------------------
+ There are 4 pins that are not constrained for maximum delay. (HIGH)
+
+ There are 0 pins that are not constrained for maximum delay due to constant clock.
+
+
+5. checking no_input_delay (2)
+------------------------------
+ There are 2 input ports with no input delay specified. (HIGH)
+
+ There are 0 input ports with no input delay but user has a false path constraint.
+
+
+6. checking no_output_delay (1)
+-------------------------------
+ There is 1 port with no output delay specified. (HIGH)
+
+ There are 0 ports with no output delay but user has a false path constraint
+
+ There are 0 ports with no output delay but with a timing clock defined on it or propagating through it
+
+
+7. checking multiple_clock (0)
+------------------------------
+ There are 0 register/latch pins with multiple clocks.
+
+
+8. checking generated_clocks (0)
+--------------------------------
+ There are 0 generated clocks that are not connected to a clock source.
+
+
+9. checking loops (0)
+---------------------
+ There are 0 combinational loops in the design.
+
+
+10. checking partial_input_delay (3)
+------------------------------------
+ There are 3 input ports with partial input delay specified. (HIGH)
+
+
+11. checking partial_output_delay (0)
+-------------------------------------
+ There are 0 ports with partial output delay specified.
+
+
+12. checking latch_loops (0)
+----------------------------
+ There are 0 combinational latch loops in the design through latch input
+
+

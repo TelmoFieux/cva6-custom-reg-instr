@@ -72,7 +72,7 @@ module load_unit
   // we need a a buffer which can hold all inflight memory load requests
   typedef struct packed {
     logic [CVA6Cfg.TRANS_ID_BITS-1:0]    trans_id;        // scoreboard identifier
-    logic [CVA6Cfg.NrLSQEntries-1:0]     ldq_idx;         // load queue index
+    logic [$clog2(CVA6Cfg.NrLSQEntries)-1:0] ldq_idx;     // load queue index
     logic [CVA6Cfg.XLEN_ALIGN_BYTES-1:0] address_offset;  // least significant bits of the address
     fu_op                                operation;       // type of load
   } ldbuf_t;
@@ -223,11 +223,11 @@ module load_unit
     case (state_q)
       IDLE: begin
         if (accept_req) begin
+
+          req_port_o.data_req = 1'b1;
+
           if (req_port_i.data_gnt) begin
-            if (USE_HPDCACHE)
-              state_d = IDLE;
-            else
-              state_d = SEND_TAG;
+            state_d = USE_HPDCACHE ? IDLE : SEND_TAG;
           end else begin
             state_d = WAIT_GNT;
           end
