@@ -526,8 +526,8 @@ package ariane_pkg;
   // list of all RS possible
   typedef enum logic [3:0] {
     FLU,
-    LOAD_STORE,
     FPU_ALU2,
+    LOAD_STORE,
     // F_ACCEL, not allowed yet on superscalar mode
     F_CVXIF
   } fu_phys;

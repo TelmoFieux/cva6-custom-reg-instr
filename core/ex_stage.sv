@@ -548,6 +548,30 @@ module ex_stage
   // Load-Store Unit
   // ----------------
 
+  logic csr_snoop_valid_q;
+  logic [CVA6Cfg.TRANS_ID_BITS-1:0] csr_snoop_trans_id_q;
+  logic [CVA6Cfg.XLEN-1:0]          csr_snoop_data_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      csr_snoop_valid_q    <= 1'b0;
+      csr_snoop_trans_id_q <= '0;
+      csr_snoop_data_q     <= '0;
+
+    end else if (flush_i) begin
+      csr_snoop_valid_q    <= 1'b0;
+      csr_snoop_trans_id_q <= '0;
+      csr_snoop_data_q     <= '0;
+
+    end else begin
+      csr_snoop_valid_q <= csr_we_i;
+
+      if (csr_we_i) begin
+        csr_snoop_trans_id_q <= csr_trans_id_i;
+        csr_snoop_data_q     <= csr_rdata_i;
+      end
+    end
+  end
 
   // The write back will probably cause a combinatorial loop
   // if CVA6Cfg.NrLoadPipeRegs == 0
@@ -556,13 +580,14 @@ module ex_stage
   logic [CVA6Cfg.NrWbPorts-1:0] wt_valid;
 
   //assembling wb_data just like in the cva6 file
-  assign wb_trans_id[FLU_WB] = csr_we_i ? csr_trans_id_i : flu_trans_id_o;
-  assign wbdata[FLU_WB]   = csr_we_i ? csr_rdata_i : flu_result_o;
-  assign wt_valid[FLU_WB] = csr_we_i || flu_valid_o;
+  assign wb_trans_id[FLU_WB] = flu_trans_id_o;
+  assign wbdata[FLU_WB]   = flu_result_o;
+  assign wt_valid[FLU_WB] = flu_valid_o;
 
-  assign wb_trans_id[STORE_WB] = '0;
-  assign wbdata[STORE_WB]   = '0;
-  assign wt_valid[STORE_WB] = '0;
+  // Registered CSR snoop
+  assign wb_trans_id[STORE_WB] = csr_snoop_trans_id_q;
+  assign wbdata[STORE_WB]      = csr_snoop_data_q;
+  assign wt_valid[STORE_WB]    = csr_snoop_valid_q;
 
   assign wb_trans_id[LOAD_WB] = load_trans_id_o;
   assign wbdata[LOAD_WB]   = load_result_o;

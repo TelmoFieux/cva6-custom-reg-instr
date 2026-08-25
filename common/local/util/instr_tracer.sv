@@ -74,21 +74,6 @@ module instr_tracer #(
   // contains mappings of the form vaddr <-> paddr
   logic [63:0] store_mapping[$], load_mapping[$], address_mapping;
 
-  // Questa/vopt workaround:
-  // specialize the parameterized trace classes once at module scope.
-  // Local function declarations then use simple typedef names and contain no "#(...)".
-  typedef instr_trace_item #(
-    .CVA6Cfg(CVA6Cfg),
-    .bp_resolve_t(bp_resolve_t),
-    .scoreboard_entry_t(scoreboard_entry_t)
-  ) instr_trace_item_t;
-
-  typedef ex_trace_item #(
-    .CVA6Cfg(CVA6Cfg),
-    .interrupts_t(interrupts_t),
-    .INTERRUPTS(INTERRUPTS)
-  ) ex_trace_item_t;
-
   // static uvm_cmdline_processor uvcl = uvm_cmdline_processor::get_inst();
 
   function void create_file(logic [63:0] hart_id);
@@ -254,52 +239,57 @@ module instr_tracer #(
     logic debug_mode,
     bp_resolve_t bp
   );
-    instr_trace_item_t iti;
-    string print_instr;
 
-    iti = new(
-      $time,
-      clk_ticks,
-      sbe,
-      instr,
-      gp_reg_file,
-      fp_reg_file,
-      result,
-      paddr,
-      priv_lvl,
-      debug_mode,
-      bp
+  automatic instr_trace_item #(
+    .CVA6Cfg(CVA6Cfg),
+    .bp_resolve_t(bp_resolve_t),
+    .scoreboard_entry_t(scoreboard_entry_t)
+  ) iti = new(
+    $time,
+    clk_ticks,
+    sbe,
+    instr,
+    gp_reg_file,
+    fp_reg_file,
+    result,
+    paddr,
+    priv_lvl,
+    debug_mode,
+    bp
+  );
+
+  automatic string print_instr = iti.printInstr();
+
+  if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && !debug_mode) begin
+    $fwrite(
+      commit_log,
+      riscv::spikeCommitLog(
+        sbe.pc,
+        priv_lvl,
+        instr,
+        sbe.rd,
+        result,
+        ariane_pkg::is_rd_fpr(sbe.op)
+      )
     );
+  end
 
-    print_instr = iti.printInstr();
-
-    if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && !debug_mode) begin
-      $fwrite(
-        commit_log,
-        riscv::spikeCommitLog(
-          sbe.pc,
-          priv_lvl,
-          instr,
-          sbe.rd,
-          result,
-          ariane_pkg::is_rd_fpr(sbe.op)
-        )
-      );
-    end
-
-    $fwrite(f, {print_instr, "\n"});
-  endfunction
+  $fwrite(f, {print_instr, "\n"});
+endfunction
 
   function automatic void printException(
     logic [CVA6Cfg.VLEN-1:0] pc,
     logic [63:0] cause,
     logic [63:0] tval
   );
-    ex_trace_item_t eti;
-    string print_ex;
 
-    eti = new(pc, cause, tval);
-    print_ex = eti.printException();
+    automatic ex_trace_item #(
+      .CVA6Cfg(CVA6Cfg),
+      .interrupts_t(interrupts_t),
+      .INTERRUPTS(INTERRUPTS)
+    ) eti = new(pc, cause, tval);
+
+    automatic string print_ex = eti.printException();
 
     $fwrite(f, {print_ex, "\n"});
   endfunction

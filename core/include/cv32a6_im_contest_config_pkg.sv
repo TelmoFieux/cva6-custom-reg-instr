@@ -51,7 +51,7 @@ package cva6_config_pkg;
 
   localparam CVA6ConfigNrLoadPipeRegs = 1;
   localparam CVA6ConfigNrStorePipeRegs = 0;
-  localparam CVA6ConfigNrLoadBufEntries = 1;
+  localparam CVA6ConfigNrLoadBufEntries = 2;
 
   localparam CVA6ConfigRASDepth = 2;
   localparam CVA6ConfigBTBEntries = 32;

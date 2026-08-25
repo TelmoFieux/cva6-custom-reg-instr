@@ -353,32 +353,41 @@ module load_store_unit
     // dcache request without mmu for load or store,
     // Delay of 1 cycle to match MMU latency giving the address tag
     always_ff @(posedge clk_i or negedge rst_ni) begin
-      if (~rst_ni) begin
+      if (!rst_ni) begin
         lsu_paddr             <= '0;
         pmp_exception         <= '0;
         pmp_translation_valid <= 1'b0;
 
         no_mmu_vaddr_q        <= '0;
         no_mmu_is_store_q     <= 1'b0;
+
       end else begin
 
-        if (CVA6Cfg.VLEN >= CVA6Cfg.PLEN) begin : gen_virtual_physical_address_lsu
-          lsu_paddr <= mmu_vaddr[CVA6Cfg.PLEN-1:0];
-        end else begin
-          lsu_paddr <= CVA6Cfg.PLEN'(mmu_vaddr);
-        end
-
-        pmp_exception         <= misaligned_exception;
+        // Valid always advances.
         pmp_translation_valid <= translation_req;
 
-        // Metadata belonging to exactly the same request
-        no_mmu_vaddr_q        <= mmu_vaddr;
-        no_mmu_is_store_q     <= st_translation_req;
+        if (translation_req) begin
+
+          if (CVA6Cfg.VLEN >= CVA6Cfg.PLEN) begin : gen_virtual_physical_address_lsu
+            lsu_paddr <= mmu_vaddr[CVA6Cfg.PLEN-1:0];
+          end else begin
+            lsu_paddr <= CVA6Cfg.PLEN'(mmu_vaddr);
+          end
+
+          pmp_exception     <= misaligned_exception;
+
+          no_mmu_vaddr_q    <= mmu_vaddr;
+          no_mmu_is_store_q <= st_translation_req;
+
+        end else begin
+
+          // No valid transaction => exception payload irrelevant.
+          pmp_exception <= '0;
+
+        end
       end
     end
 
-    assign pmp_lsu_vaddr = CVA6Cfg.MmuPresent ? mmu_vaddr : no_mmu_vaddr_q;
-    assign pmp_lsu_is_store = CVA6Cfg.MmuPresent ? st_translation_req : no_mmu_is_store_q;
 
     // dcache interface of PTW not used
     assign dcache_req_ports_o[0].address_index = '0;
@@ -399,6 +408,9 @@ module load_store_unit
     assign dtlb_hit                            = 1'b1;
 
   end
+
+  assign pmp_lsu_vaddr = CVA6Cfg.MmuPresent ? mmu_vaddr : no_mmu_vaddr_q;
+  assign pmp_lsu_is_store = CVA6Cfg.MmuPresent ? st_translation_req : no_mmu_is_store_q;
 
   // ------------------
   // PMP

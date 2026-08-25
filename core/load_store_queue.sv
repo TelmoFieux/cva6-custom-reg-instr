@@ -295,30 +295,21 @@ module load_store_queue
   logic [LSQ_DEPTH-1:0][CVA6Cfg.XLEN-1:0] wb_data;
   exception_t [LSQ_DEPTH-1:0] wb_ex;
 
-  logic [LSQ_DEPTH-1:0] ld_ready_tournament_valid;
-  logic [LSQ_DEPTH-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] ld_ready_tournament_seq_num;
-  logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] ld_ready_tournament_id;
-
-  for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
-    assign ld_ready_tournament_seq_num[i] = ld_queue_q.instr[i].global_id;
-    // in theory should not select a forwardable load (in theory...)
-    assign ld_ready_tournament_valid[i] = ld_unit_ready[i];
-    assign ld_ready_tournament_id[i] = i;
-  end
-
   logic [$clog2(LSQ_DEPTH)-1:0] ld_ready_pointer;
   logic ld_ready_pointer_valid;
+  logic ld_ready_empty;
 
-  tournament_tree #(
-      .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
-      .NR_PLAYER(LSQ_DEPTH)
-    ) i_ld_ready_tournament_tree (
-      .valid_i    (ld_ready_tournament_valid),
-      .seq_num_i  (ld_ready_tournament_seq_num),
-      .id_i       (ld_ready_tournament_id),
-      .winner_o   (ld_ready_pointer),
-      .winner_valid_o (ld_ready_pointer_valid)
+  lzc #(
+      .WIDTH(LSQ_DEPTH),
+      .MODE(1'b0))
+  i_ld_ready_lzc (
+      .in_i   (ld_unit_ready),
+      .cnt_o  (ld_ready_pointer),
+      .empty_o(ld_ready_empty)
   );
+
+  assign ld_ready_pointer_valid = !ld_ready_empty;
+
 
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : decoded_req_alloc
     // ------------------------
@@ -539,17 +530,27 @@ module load_store_queue
       end
     end
 
-    if (flush_i) begin
-      st_snooped_we = '0;
-      ld_snooped_we = '0;
-    end
-
   end
 
 
   // ---------------
   // LSQ Queue updates
   // ---------------
+
+  //register this signal to reduce critical path
+  logic st_sent_to_cache_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+      if (!rst_ni)
+          st_sent_to_cache_q <= 1'b0;
+      else
+          st_sent_to_cache_q <= st_sent_to_cache_i;
+  end
+
+  // internal version of translation_req_o
+  logic translation_req_int;
+  // internal signal of ld_valid_o
+  logic ld_valid_int;
 
   logic [CVA6Cfg.NrIssuePorts:0][LSQ_DEPTH-1:0] ld_free_entries_masked;
   logic [CVA6Cfg.NrIssuePorts-1:0] ld_empty_mask;
@@ -575,30 +576,21 @@ module load_store_queue
 
   assign ld_full = ld_empty_mask;
 
-  logic [LSQ_DEPTH-1:0] ld_wb_tournament_valid;
-  logic [LSQ_DEPTH-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] ld_wb_tournament_seq_num;
-  logic [LSQ_DEPTH-1:0][$clog2(LSQ_DEPTH)-1:0] ld_wb_tournament_id;
-
-  for (genvar i = 0 ; i < LSQ_DEPTH ; i++) begin
-    assign ld_wb_tournament_seq_num[i] = ld_queue_q.instr[i].global_id;
-    assign ld_wb_tournament_valid[i] = wb_valid[i];
-    assign ld_wb_tournament_id[i] = i;
-  end
 
   logic [$clog2(LSQ_DEPTH)-1:0] ld_wb_pointer;
   logic ld_wb_pointer_valid;
+  logic ld_wb_empty;
 
-  tournament_tree #(
-      .ID_SIZE(CVA6Cfg.GlobalRsIdWidth),
-      .NR_PLAYER(LSQ_DEPTH)
-    ) i_ld_wb_tournament_tree (
-      .valid_i    (ld_wb_tournament_valid),
-      .seq_num_i  (ld_wb_tournament_seq_num),
-      .id_i       (ld_wb_tournament_id),
-      .winner_o   (ld_wb_pointer),
-      .winner_valid_o (ld_wb_pointer_valid)
+  lzc #(
+      .WIDTH(LSQ_DEPTH),
+      .MODE(1'b0))
+  i_ld_wb_lzc (
+      .in_i   (wb_valid),
+      .cnt_o  (ld_wb_pointer),
+      .empty_o(ld_wb_empty)
   );
 
+  assign ld_wb_pointer_valid = !ld_wb_empty;
 
   logic [LSQ_DEPTH-1:0][CVA6Cfg.XLEN-1:0] data_snooped;
   logic [LSQ_DEPTH-1:0] data_snooped_valid;
@@ -869,7 +861,7 @@ module load_store_queue
       st_queue_n.committed[st_commit_pointer_q] = 1'b1;
     end
 
-    if(st_sent_to_cache_i) begin
+    if(st_sent_to_cache_q) begin
       st_queue_n.ready[st_drain_pointer_q] = '0;
       st_queue_n.reserved[st_drain_pointer_q] = '0;
       st_queue_n.vaddr_valid[st_drain_pointer_q] = '0;
@@ -907,7 +899,7 @@ module load_store_queue
     end
 
     // free entrie only when wb is done
-    if (ld_valid_o) begin
+    if (ld_valid_int) begin
       ld_queue_n.ready[ld_wb_pointer] = '0;
       ld_queue_n.issued[ld_wb_pointer] = '0;
       ld_queue_n.result_valid[ld_wb_pointer] = '0;
@@ -954,8 +946,6 @@ module load_store_queue
     end
 
     if (flush_i) begin
-      ld_queue_n = '0;
-      ld_ready_pointer_valid_n = 1'b0;
       // issue stage already resets the token counter
       ld_return_token = '0;
 
@@ -1101,9 +1091,10 @@ module load_store_queue
   assign lsu_ctrl_o = translation_pointer_valid_q & CVA6Cfg.MmuPresent ?
       (translation_pointer_type_q ? st_queue_q.instr[translation_pointer_q] : ld_queue_q.instr[translation_pointer_q])
     : (comb_translation_pointer_type ? st_comb_lsu_ctrl_o[comb_translation_pointer] : ld_comb_lsu_ctrl_o[comb_translation_pointer]);
-  assign translation_req_o = CVA6Cfg.MmuPresent ?
+  assign translation_req_int = (CVA6Cfg.MmuPresent ?
       (translation_pointer_valid_q || comb_translation_pointer_valid)
-    : comb_translation_pointer_valid;
+    : comb_translation_pointer_valid);
+ assign translation_req_o = translation_req_int && !flush_i;
 
   always_comb begin : comb_translation_data
 
@@ -1139,7 +1130,7 @@ module load_store_queue
     for (int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
 
       // validity updated from st_queue_q and current paddr state
-      if (st_queue_q.reserved[i] && st_queue_q.vaddr_valid[i] && !st_paddr_valid[i] && !st_is_translating[i]) begin
+      if (st_queue_q.reserved[i] && st_queue_q.vaddr_valid[i] && !st_queue_q.paddr_valid[i] && !st_is_translating[i]) begin
         st_comb_vaddr_valid[i] = 1'b1;
         st_comb_lsu_ctrl_o[i] = st_queue_q.instr[i];
         st_comb_vaddr_o[i] = st_queue_q.instr[i].vaddr;
@@ -1175,7 +1166,7 @@ module load_store_queue
 
 
       // validity updated from st_queue_q and current paddr state
-      if (ld_queue_q.reserved[i] && ld_queue_q.vaddr_valid[i] && !ld_paddr_valid[i] && !ld_is_translating[i]) begin
+      if (ld_queue_q.reserved[i] && ld_queue_q.vaddr_valid[i] && !ld_queue_q.paddr_valid[i] && !ld_is_translating[i]) begin
         ld_comb_vaddr_valid[i] = 1'b1;
         ld_comb_lsu_ctrl_o[i] = ld_queue_q.instr[i];
         ld_comb_vaddr_o[i] = ld_queue_q.instr[i].vaddr;
@@ -1208,14 +1199,6 @@ module load_store_queue
         ld_comb_hs_ld_st_inst_o[i] = ld_queue_q.instr[i].hs_ld_st_inst;
         ld_comb_hlvx_inst_o[i] = ld_queue_q.instr[i].hlvx_inst;
       end
-    end
-
-    // I dont think this part needs Rollback
-
-    // not necessary but just to be secure
-    if (flush_i) begin
-      st_comb_vaddr_valid = '0;
-      ld_comb_vaddr_valid = '0;
     end
 
   end
@@ -1281,7 +1264,7 @@ module load_store_queue
     // previous one is sent
     end else if (CVA6Cfg.NonIdemPotenceEn) begin
 
-      translation_data_valid_n = translation_req_o;
+      translation_data_valid_n = translation_req_int;
 
       if (ld_translation_pointer_valid &&
         (!st_translation_pointer_valid ||
@@ -1315,7 +1298,7 @@ module load_store_queue
         end
       end
 
-      if (rollback_i[i] && translation_req_o) begin
+      if (rollback_i[i] && translation_req_int) begin
         if (lsu_ctrl_o.trans_id == rollback_trans_id_i[i]) begin
           translation_pointer_valid_n = 1'b0;
           translation_data_valid_n = '0;
@@ -1331,16 +1314,6 @@ module load_store_queue
 
     end
 
-    if (flush_i) begin
-      comb_translation_pointer_valid = 1'b0;
-      translation_pointer_n = '0;
-      previous_translation_pointer_n = '0;
-      previous_translation_pointer_type_n = '0;
-      translation_pointer_valid_n = '0;
-      translation_pointer_type_n = '0;
-      translation_data_valid_n = '0;
-    end
-
   end
 
   // ---------------
@@ -1354,7 +1327,7 @@ module load_store_queue
   assign ld_unit_lsu_ctrl_o = ld_queue_q.instr[ld_selected_pointer];
   assign ld_unit_paddr_o = ld_paddr[ld_selected_pointer];
   assign ld_unit_idx_o = ld_selected_pointer;
-  assign ld_unit_valid_o = (ld_ready_pointer_valid_q || ld_ready_pointer_valid) && !ldbuf_full_i;
+  assign ld_unit_valid_o = (ld_ready_pointer_valid_q || ld_ready_pointer_valid) && !ldbuf_full_i && !flush_i;
 
 
   always_comb begin : adress_dependencies
@@ -1380,11 +1353,6 @@ module load_store_queue
         end
 
       end
-    end
-
-    if (flush_i) begin
-      st_paddr_valid = '0;
-      ld_paddr_valid = '0;
     end
 
   end
@@ -1487,12 +1455,6 @@ module load_store_queue
       end
     end
 
-    if (flush_i) begin
-      st_older = '0;
-      st_older_paddr_valid = '0;
-      st_older_all_valid = '0;
-      data_valid = '0;
-    end
 
   end
 
@@ -1501,10 +1463,12 @@ module load_store_queue
   // Load write back
   // ---------------
 
+
+  assign ld_valid_int = ld_wb_pointer_valid;
   //assign load write back info
   assign ld_result_o = wb_data[ld_wb_pointer];
   assign ld_ex_o = wb_ex[ld_wb_pointer];
-  assign ld_valid_o = ld_wb_pointer_valid;
+  assign ld_valid_o = ld_valid_int && !flush_i;
   assign ld_global_id_o = ld_queue_q.instr[ld_wb_pointer].global_id;
   assign ld_trans_id_o = ld_queue_q.instr[ld_wb_pointer].trans_id;
 
@@ -1555,12 +1519,6 @@ module load_store_queue
       end
     end
 
-    if (flush_i) begin
-      wb_data = '0;
-      wb_ex = '0;
-      wb_valid = '0;
-    end
-
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -1578,6 +1536,21 @@ module load_store_queue
       translation_pointer_type_q <= '0;
       previous_translation_pointer_type_q <= '0;
       ld_ready_pointer_valid_q <= '0;
+    end else if (flush_i) begin
+      ld_queue_q <= '0;
+      ld_ready_pointer_q <= '0;
+      ld_ready_pointer_valid_q <= 1'b0;
+      translation_data_valid_q <= '0;
+      translation_pointer_q <= '0;
+      previous_translation_pointer_q <= '0;
+      previous_translation_pointer_type_q <= '0;
+      translation_pointer_valid_q <= '0;
+      translation_pointer_type_q <= '0;
+      st_queue_q <= st_queue_n;
+      st_status_cnt_q <= st_status_cnt_n;
+      st_issue_pointer_q <= st_issue_pointer_n;
+      st_drain_pointer_q <= st_drain_pointer_n;
+      st_commit_pointer_q <= st_commit_pointer_n;
     end else begin
       st_queue_q <= st_queue_n;
       ld_queue_q <= ld_queue_n;

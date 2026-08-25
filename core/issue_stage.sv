@@ -458,7 +458,9 @@ module issue_stage
   // 2. Manage instructions in reservation stations
   // ---------------------------------------------------------
 
-  localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
+  // localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
+  // With lsq no more LOAD_STORE_RS
+  localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 3 : 2;
 
   logic [CVA6Cfg.NrIssuePorts-1:0] lsq_bypass_full;
   logic [CVA6Cfg.NrIssuePorts-1:0] lsq_bypass_we;
@@ -638,7 +640,8 @@ module issue_stage
 
   logic [TOKEN_W-1:0] ld_token_n, ld_token_q;
   logic [TOKEN_W-1:0] st_token_n, st_token_q;
-
+  logic [TOKEN_W-1:0] ld_return_token_q;
+  logic [TOKEN_W-1:0] st_return_token_q;
 
 
   for (genvar i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
@@ -663,33 +666,32 @@ module issue_stage
     automatic logic [TOKEN_W-1:0] ld_token, ld_speculative_token;
     automatic logic [TOKEN_W-1:0] st_token, st_speculative_token;
 
-    ld_token = ld_token_q;
-    st_token = st_token_q;
+    // Incorporate credits returned during the PREVIOUS cycle.
+    // It helps with long critical path
+    ld_token = ld_token_q + ld_return_token_q;
+    st_token = st_token_q + st_return_token_q;
 
     ld_token_valid = '0;
     st_token_valid = '0;
 
-    // works for default behavior as well as flushes and rollback
-    st_token = st_token + st_return_token_i;
-    ld_token = ld_token + ld_return_token_i;
+    ld_speculative_token = ld_token;
+    st_speculative_token = st_token;
 
-    ld_speculative_token = ld_token_q;
-    st_speculative_token = st_token_q;
-
-    for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
-      if (ld_speculative_token > 0 & lsq_dispatch_instr_valid[i] & lsq_dispatch_instr[i].fu == LOAD) begin
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (ld_speculative_token > 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr[i].fu == LOAD) begin
         ld_token_valid[i] = 1'b1;
         ld_speculative_token = ld_speculative_token - 1'b1;
-      end else if (st_speculative_token > 0 & lsq_dispatch_instr_valid[i] & lsq_dispatch_instr[i].fu == STORE) begin
+      end else if (st_speculative_token > 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr[i].fu == STORE) begin
         st_token_valid[i] = 1'b1;
         st_speculative_token = st_speculative_token - 1'b1;
       end
     end
 
-    for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
-      if (rm_i[i] & issue_instr_sb_iro[i].fu == LOAD) begin
+    // Tokens are actually consumed only when IRO accepts the instruction.
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (rm_i[i] && issue_instr_sb_iro[i].fu == LOAD) begin
         ld_token = ld_token - 1'b1;
-      end else if (rm_i[i] & issue_instr_sb_iro[i].fu == STORE) begin
+      end else if (rm_i[i] && issue_instr_sb_iro[i].fu == STORE) begin
         st_token = st_token - 1'b1;
       end
     end
@@ -701,14 +703,20 @@ module issue_stage
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      ld_token_q <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
-      st_token_q <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+      ld_token_q        <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+      ld_return_token_q <= '0;
+      st_token_q        <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+      st_return_token_q <= '0;
     end else if (flush_i) begin
-      ld_token_q <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
-      st_token_q <= st_token_n;
+      ld_token_q        <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
+      ld_return_token_q <= '0;
+      st_token_q        <= st_token_n;
+      st_return_token_q <= st_return_token_i;
     end else begin
-      ld_token_q <= ld_token_n;
-      st_token_q <= st_token_n;
+      ld_token_q        <= ld_token_n;
+      ld_return_token_q <= ld_return_token_i;
+      st_token_q        <= st_token_n;
+      st_return_token_q <= st_return_token_i;
     end
   end
 

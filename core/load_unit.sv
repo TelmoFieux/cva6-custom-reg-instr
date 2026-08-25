@@ -45,7 +45,7 @@ module load_unit
     input lsu_ctrl_t lsu_ctrl_i,
     // index of the load instr in the load queue - LOAD_UNIT
     input logic [$clog2(CVA6Cfg.NrLSQEntries)-1:0] ld_unit_idx_i,
-    // Pop the load request from the LSU bypass FIFO - LSU_BYPASS
+    // Pop the load request from the LSU bypass FIFO - LOAD_STORE_QUEUE
     output logic pop_ld_o,
     // Load unit result is valid - ISSUE_STAGE
     output logic valid_o,
