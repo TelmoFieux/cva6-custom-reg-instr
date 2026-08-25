@@ -367,7 +367,6 @@ module load_store_unit
         pmp_translation_valid <= translation_req;
 
         if (translation_req) begin
-
           if (CVA6Cfg.VLEN >= CVA6Cfg.PLEN) begin : gen_virtual_physical_address_lsu
             lsu_paddr <= mmu_vaddr[CVA6Cfg.PLEN-1:0];
           end else begin
@@ -378,12 +377,6 @@ module load_store_unit
 
           no_mmu_vaddr_q    <= mmu_vaddr;
           no_mmu_is_store_q <= st_translation_req;
-
-        end else begin
-
-          // No valid transaction => exception payload irrelevant.
-          pmp_exception <= '0;
-
         end
       end
     end
