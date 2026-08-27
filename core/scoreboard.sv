@@ -106,6 +106,8 @@ module scoreboard
     // is lsu valid - ISSUE_READ_OPERANDS
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                             lsu_valid_i,
 
+    // is rollbacked instr a load rollback - ISSUE_STAGE
+    output logic [CVA6Cfg.RollbackWidth-1:0]                            rollbacked_ld_o,
 
     // physical destination register to rollback - ISSUE_STAGE
     output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.RegAddrWidth-1:0]             rollback_rd_o,
@@ -449,6 +451,7 @@ end
     bmiss_trans_id_n  = bmiss_trans_id_q;
     rollback_active_d = rollback_active_q;
     rollback_rd_o = '0;
+    rollbacked_ld_o = '0;
     rollback_we_o = '0;
     rollback_store_buffer_o = '0;
     rollback_ex_o = '0;
@@ -485,6 +488,8 @@ end
             rollback_rd_o[i] = mem_q[rollback_index].sbe.rd;
             rollback_id_o[i] = mem_q[rollback_index].sbe.global_rs_id;
             rollback_we_o[i] = mem_q[rollback_index].issued && state_n != NORMAL;
+            rollbacked_ld_o[i] = mem_q[rollback_index].sbe.fu == LOAD && !mem_q[rollback_index].sbe.valid
+                                 && !mem_q[rollback_index].sbe.ex.valid && !wt_valid_i[LOAD_WB];
             rollback_store_buffer_o[i] = (mem_q[rollback_index].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_index)) && state_n != NORMAL;
             rollback_ex_o[i] = mem_q[rollback_index].issued && state_n != NORMAL;
             rollback_old_phys_o[i] = mem_q[rollback_index].sbe.old_phys;

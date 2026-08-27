@@ -136,6 +136,10 @@ module store_unit
   assign store_buffer_valid = st_valid_i & (!CVA6Cfg.RVA || (amo_op == AMO_NONE));
   assign amo_buffer_valid = st_valid_i & (CVA6Cfg.RVA && (amo_op != AMO_NONE));
 
+  logic store_buffer_ready;
+
+  assign commit_ready_o = store_buffer_ready && st_valid_i;
+
   // ---------------
   // Store Queue
   // ---------------
@@ -151,7 +155,7 @@ module store_unit
       .no_st_pending_o,
       .commit_i,
       .store_buffer_valid_i (store_buffer_valid),
-      .commit_ready_o,
+      .commit_ready_o       (store_buffer_ready),
       .paddr_i,
       .rvfi_mem_paddr_o     (rvfi_mem_paddr_o),
       .data_i               (st_data),

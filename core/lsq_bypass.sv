@@ -86,6 +86,9 @@ module lsq_bypass
 
   assign full_o = full;
 
+  logic [CVA6Cfg.NrIssuePorts-1:0] decoded_used;
+  logic [CVA6Cfg.NrIssuePorts-1:0] fallthrough_out;
+  logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(CVA6Cfg.NrIssuePorts)-1:0] fallthrough_src;
 
   always_comb begin : full_logic
 
@@ -136,8 +139,8 @@ module lsq_bypass
             issue_pointer = issue_pointer + 1'b1;
           for (int unsigned j = 0; j<CVA6Cfg.NrIssuePorts ; j++) begin
             if (rm_i[j] & rm_id_i[j] == decoded_instr_i[i].global_rs_id) begin
-              instr_queue_n.free[issue_pointer] = 1'b1;
               issue_pointer = issue_pointer - 1'b1;
+              instr_queue_n.free[issue_pointer] = 1'b1;
             end
           end
         end
@@ -179,11 +182,12 @@ module lsq_bypass
   always_comb begin : dispatch_instr_data
 
     automatic logic [CVA6Cfg.NrIssuePorts-1:0] is_queue_dispatch;
-    automatic logic [CVA6Cfg.NrIssuePorts-1:0] is_same_cylce_dispatch;
     automatic logic [$clog2(NR_ENTRIES)-1:0] ptr;
 
     is_queue_dispatch = '0;
-    is_same_cylce_dispatch = '0;
+    decoded_used = '0;
+    fallthrough_out = '0;
+    fallthrough_src = '0;
 
 
     ptr = dispatch_pointer_q;
@@ -193,25 +197,24 @@ module lsq_bypass
         dispatch_instr_valid_o[i] = !instr_queue_q.free[ptr];
         dispatch_instr_data_o[i].vaddr_trans_id = instr_queue_q.vaddr_trans_id[ptr];
         dispatch_instr_data_o[i].data_trans_id = instr_queue_q.data_trans_id[ptr];
+        is_queue_dispatch[i] = !instr_queue_q.free[ptr];
         ptr = ptr + 1'b1;
     end
 
 
     if (FALLTHROUGH) begin
-      //TODO : pour le FALLTHROUGH ne pas oublier qu'il faut quand même vérifier les dépendance same
-      //cycle peut importe la fu. A l'heure actuel je vérifie les dépendance same cycle entre les
-      //instruction dispatch mais il faut le faire aussi si jamais on a instr 1 = ADD r1, r2, r2 et
-      //instr 2 = LOAD r3, r1 alors on une dépendance
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
         if (!is_queue_dispatch[i]) begin
           for (int unsigned j = 0; j<CVA6Cfg.NrIssuePorts ; j++) begin
-            if (we[j] & !is_queue_dispatch[i] & !is_same_cylce_dispatch[j]) begin
+            if (we[j] & decoded_instr_ack_i[j] & !is_queue_dispatch[i] & !decoded_used[j]) begin
               dispatch_instr_o[i] = decoded_instr_i[j];
               dispatch_instr_valid_o[i] = decoded_instr_valid_i[j];
               dispatch_instr_data_o[i].vaddr_trans_id = vaddr_trans_id_i[j];
               dispatch_instr_data_o[i].data_trans_id = data_trans_id_i[j];
+              decoded_used[j] = 1'b1;
               is_queue_dispatch[i] = 1'b1;
-              is_same_cylce_dispatch[j] = 1'b1;
+              fallthrough_out[i] = 1'b1;
+              fallthrough_src[i] = j;
             end
           end
         end
@@ -233,6 +236,23 @@ module lsq_bypass
             dispatch_instr_data_o[i].vaddr_valid = 1'b0;
           end
         end
+
+        if (FALLTHROUGH) begin
+          if (fallthrough_out[i]) begin
+            for (int unsigned k = 0; k < CVA6Cfg.NrIssuePorts; k++) begin
+              if (k < fallthrough_src[i] && decoded_instr_ack_i[k]) begin
+                if (decoded_instr_i[k].rd == dispatch_instr_o[i].rs1 && decoded_instr_i[k].rd != '0) begin
+                  dispatch_instr_data_o[i].vaddr_valid = 1'b0;
+                end
+
+                if (decoded_instr_i[k].rd == dispatch_instr_o[i].rs2 && decoded_instr_i[k].rd != '0) begin
+                  dispatch_instr_data_o[i].data_valid = 1'b0;
+                end
+              end
+            end
+          end
+        end
+
       end
     end else begin
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin

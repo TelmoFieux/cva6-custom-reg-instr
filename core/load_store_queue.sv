@@ -104,8 +104,6 @@ module load_store_queue
     input logic                                                       st_sent_to_cache_i,
     // number of store queue freed this cycle - ISSUE_STAGE
     output logic [$clog2(LSQ_DEPTH+1)-1:0]                            st_return_token_o,
-    // number of store queue freed this cycle - ISSUE_STAGE
-    output logic [$clog2(LSQ_DEPTH+1)-1:0]                            ld_return_token_o,
 
     output lsu_ctrl_t                                                 ld_unit_lsu_ctrl_o,
     output logic                                                      ld_unit_valid_o,
@@ -273,11 +271,9 @@ module load_store_queue
   assign st_buf_lsu_ctrl_o = st_queue_q.instr[st_commit_pointer_q];
   assign st_buf_paddr_o = st_queue_q.paddr[st_commit_pointer_q];
   assign st_buf_valid_o = !st_rollbacked && st_queue_q.reserved[st_commit_pointer_q]
-    && st_queue_q.ready[st_commit_pointer_q]
     && st_queue_q.paddr_valid[st_commit_pointer_q]
     && st_queue_q.data_valid[st_commit_pointer_q]
-    && !st_queue_q.ex_valid[st_commit_pointer_q]
-    && (commit_trans_id_i == st_queue_q.instr[st_commit_pointer_q].trans_id);
+    && !st_queue_q.ex_valid[st_commit_pointer_q];
 
 
   lsu_ctrl_t [CVA6Cfg.NrIssuePorts-1:0] decoded_req;
@@ -555,22 +551,14 @@ module load_store_queue
   // LSQ Queue updates
   // ---------------
 
-  // delay the freeing of the ld_queue to improve timing
-  logic                         ld_free_pending_q;
-  logic [$clog2(LSQ_DEPTH)-1:0] ld_free_idx_q;
+  // internal version of translation_req_o
+  logic translation_req_int;
+  // internal signal of ld_valid_o
+  logic ld_valid_int;
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      ld_free_pending_q <= 1'b0;
-      ld_free_idx_q     <= '0;
-    end else if (flush_i) begin
-      ld_free_pending_q <= 1'b0;
-      ld_free_idx_q     <= '0;
-    end else begin
-      ld_free_pending_q <= ld_valid_int;
-      if (ld_valid_int) ld_free_idx_q <= ld_wb_pointer;
-    end
-  end
+  logic [$clog2(LSQ_DEPTH)-1:0] ld_wb_pointer;
+  logic ld_wb_pointer_valid;
+  logic ld_wb_empty;
 
   //register this signal to reduce critical path
   logic st_sent_to_cache_q;
@@ -581,11 +569,6 @@ module load_store_queue
       else
           st_sent_to_cache_q <= st_sent_to_cache_i;
   end
-
-  // internal version of translation_req_o
-  logic translation_req_int;
-  // internal signal of ld_valid_o
-  logic ld_valid_int;
 
   logic [CVA6Cfg.NrIssuePorts:0][LSQ_DEPTH-1:0] ld_free_entries_masked;
   logic [CVA6Cfg.NrIssuePorts-1:0] ld_empty_mask;
@@ -611,11 +594,6 @@ module load_store_queue
 
   assign ld_full = ld_empty_mask;
 
-
-  logic [$clog2(LSQ_DEPTH)-1:0] ld_wb_pointer;
-  logic ld_wb_pointer_valid;
-  logic ld_wb_empty;
-
   lzc #(
       .WIDTH(LSQ_DEPTH),
       .MODE(1'b0))
@@ -636,16 +614,15 @@ module load_store_queue
 
   logic st_commit_fire;
 
-  assign st_commit_fire = commit_i && st_buf_valid_o && (commit_trans_id_i == st_queue_q.instr[st_commit_pointer_q].trans_id);
+  assign st_commit_fire = commit_i && st_buf_valid_o;
 
   always_comb begin : updating_queues
 
     automatic logic [$clog2(LSQ_DEPTH)-1:0] st_issue_pointer;
     automatic logic [$clog2(LSQ_DEPTH + 1)-1:0] st_status_cnt;
-    automatic logic [$clog2(LSQ_DEPTH + 1)-1:0] st_return_token, ld_return_token;
+    automatic logic [$clog2(LSQ_DEPTH + 1)-1:0] st_return_token;
 
     st_return_token = '0;
-    ld_return_token = '0;
 
     ld_is_forwarded = '0;
 
@@ -939,18 +916,17 @@ module load_store_queue
     end
 
     // free entrie only when wb is done
-    if (ld_free_pending_q) begin
-      ld_queue_n.ready[ld_free_idx_q] = '0;
-      ld_queue_n.issued[ld_free_idx_q] = '0;
-      ld_queue_n.result_valid[ld_free_idx_q] = '0;
-      ld_queue_n.reserved[ld_free_idx_q] = '0;
-      ld_queue_n.vaddr_valid[ld_free_idx_q] = '0;
-      ld_queue_n.paddr_valid[ld_free_idx_q] = '0;
-      ld_queue_n.paddr_ni[ld_free_idx_q] = '0;
-      ld_queue_n.matching_addr[ld_free_idx_q] = '0;
-      ld_queue_n.partial_matching_addr[ld_free_idx_q] = '0;
-      ld_queue_n.ex[ld_free_idx_q] = '0;
-      ld_return_token = ld_return_token + 1'b1;
+    if (ld_valid_o) begin
+      ld_queue_n.ready[ld_wb_pointer] = '0;
+      ld_queue_n.issued[ld_wb_pointer] = '0;
+      ld_queue_n.result_valid[ld_wb_pointer] = '0;
+      ld_queue_n.reserved[ld_wb_pointer] = '0;
+      ld_queue_n.vaddr_valid[ld_wb_pointer] = '0;
+      ld_queue_n.paddr_valid[ld_wb_pointer] = '0;
+      ld_queue_n.paddr_ni[ld_wb_pointer] = '0;
+      ld_queue_n.matching_addr[ld_wb_pointer] = '0;
+      ld_queue_n.partial_matching_addr[ld_wb_pointer] = '0;
+      ld_queue_n.ex[ld_wb_pointer] = '0;
     end
 
     for (int unsigned i = 0; i < LSQ_DEPTH; i++) begin
@@ -963,7 +939,6 @@ module load_store_queue
           ld_queue_n.paddr_valid[i] = 1'b0;
           ld_queue_n.result_valid[i] = 1'b0;
           ld_queue_n.ex[i] = '0;
-          ld_return_token = ld_return_token + 1'b1;
         end
         if (st_queue_n.reserved[i] && !st_queue_n.committed[i] && st_queue_n.instr[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
           st_queue_n.reserved[i] = 1'b0;
@@ -986,8 +961,6 @@ module load_store_queue
     end
 
     if (flush_i) begin
-      // issue stage already resets the token counter
-      ld_return_token = '0;
 
       // remove only non committed stores
       for (int unsigned i = 0; i < LSQ_DEPTH; i++) begin
@@ -1014,7 +987,6 @@ module load_store_queue
     end
 
     st_return_token_o = st_return_token;
-    ld_return_token_o = ld_return_token;
 
     //update store count
     st_status_cnt_n = st_status_cnt;
@@ -1497,22 +1469,22 @@ module load_store_queue
     //determine wich load is ready to write back
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
       // data or ex from queue
-      if ((ld_queue_q.result_valid[i] || ld_queue_q.ex[i].valid) & ld_queue_q.reserved[i] && !(ld_free_pending_q && ld_free_idx_q == i)) begin
+      if ((ld_queue_q.result_valid[i] || ld_queue_q.ex[i].valid) & ld_queue_q.reserved[i]) begin
         wb_valid[i] = 1'b1;
         wb_data[i] = ld_queue_q.result[i];
         wb_ex[i] = ld_queue_q.ex[i];
-      end else if (ld_result_valid_i & i == ld_unit_idx_i & ld_queue_q.reserved[i] && !(ld_free_pending_q && ld_free_idx_q == i)) begin
+      end else if (ld_result_valid_i & i == ld_unit_idx_i & ld_queue_q.reserved[i]) begin
       // data from load unit this cycle
         wb_valid[i] = 1'b1;
         wb_data[i] = ld_result_i;
         wb_ex[i] = ld_queue_q.ex[i];
       end else if (translation_data_valid_q & previous_translation_pointer_q == i & ex_i.valid &
-        previous_translation_pointer_type_q == 1'b0 & ld_queue_q.reserved[i] && !(ld_free_pending_q && ld_free_idx_q == i)) begin
+        previous_translation_pointer_type_q == 1'b0 & ld_queue_q.reserved[i]) begin
       // ex data from this cycle
         wb_valid[i] = 1'b1;
         wb_data[i] = '0; // does not matter
         wb_ex[i] = ex_i;
-      end else if (ld_is_forwarded[i] && !(ld_free_pending_q && ld_free_idx_q == i)) begin
+      end else if (ld_is_forwarded[i]) begin
       // data from store forwarding this cycle
         wb_valid[i] = 1'b1;
         wb_data[i] = data[full_match_winner_idx[i]];
@@ -1738,20 +1710,6 @@ module load_store_queue
 
   assert property (
     @(posedge clk_i) disable iff (!rst_ni)
-    commit_i && st_buf_valid_o
-    |->
-    commit_trans_id_i ==
-        st_queue_q.instr[st_commit_pointer_q].trans_id
-  )
-  else $error(
-    "STORE COMMIT ID MISMATCH: commit_tid=%0d sq_tid=%0d ptr=%0d",
-    $sampled(commit_trans_id_i),
-    $sampled(st_queue_q.instr[st_commit_pointer_q].trans_id),
-    $sampled(st_commit_pointer_q)
-  );
-
-  assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
     st_we_i[0] && !st_full[0]
     |->
     !st_queue_q.reserved[st_issue_pointer_q]
@@ -1772,6 +1730,41 @@ module load_store_queue
       $sampled(st_status_cnt_q)
     );
   end
+
+  assert property (
+      @(posedge clk_i) disable iff (!rst_ni)
+
+      commit_i
+      |->
+      (
+          st_queue_q.reserved[st_commit_pointer_q]
+          && st_queue_q.paddr_valid[st_commit_pointer_q]
+          && st_queue_q.data_valid[st_commit_pointer_q]
+          && !st_queue_q.ex_valid[st_commit_pointer_q]
+      )
+  )
+  else begin
+      $error(
+          "STORE COMMIT BEFORE LSQ READY: ptr=%0d tid=%0d paddr_v=%b data_v=%b",
+          st_commit_pointer_q,
+          st_queue_q.instr[st_commit_pointer_q].trans_id,
+          st_queue_q.paddr_valid[st_commit_pointer_q],
+          st_queue_q.data_valid[st_commit_pointer_q]
+      );
+  end
+
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      assert property (
+          @(posedge clk_i) disable iff (!rst_ni)
+          ld_we_i[i] |-> !ld_full[i]
+      )
+      else $error(
+          "LOAD ARRIVED AT FULL LQ: port=%0d reserved=%b",
+          i,
+          $sampled(ld_queue_q.reserved)
+      );
+  end
+
   //pragma translate_on
 
 endmodule

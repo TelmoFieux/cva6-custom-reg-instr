@@ -51,8 +51,6 @@ module load_store_unit
     input logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ack_i,
     // number of store queue entrie freed this cycle - ISSUE_STAGE
     output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_o,
-    // number of load queue entrie freed this cycle - ISSUE_STAGE
-    output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_o,
     // Instr to write to the load queue - ISSUE_STAGE
     input logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_i,
     // Instr to write to the store queue - ISSUE_STAGE
@@ -751,7 +749,6 @@ module load_store_unit
     .no_st_pending_i     (no_st_pending),
     .st_sent_to_cache_i  (st_sent_to_cache),
     .st_return_token_o   (st_return_token_o),
-    .ld_return_token_o   (ld_return_token_o),
 
     //Load unit
     .ldbuf_full_i       (ldbuf_full),

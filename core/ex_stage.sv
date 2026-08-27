@@ -111,8 +111,6 @@ module ex_stage
     output logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_o,
     // number of store queue entrie freed this cycle - ISSUE_STAGE
     output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_o,
-    // number of store queue entrie freed this cycle - ISSUE_STAGE
-    output logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_o,
     // Load result is valid - ISSUE_STAGE
     output logic load_valid_o,
     // Load result valid - ISSUE_STAGE
@@ -624,7 +622,6 @@ module ex_stage
       .fu_data_i,
       .lsq_full_o,
       .st_return_token_o,
-      .ld_return_token_o,
       .decoded_instr_valid_i,
       .decoded_instr_ack_i,
       .ld_we_i,

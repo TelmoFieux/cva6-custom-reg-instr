@@ -93,8 +93,6 @@ module issue_stage
     input logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_i,
     // Number of entry freed in the store queue - LOAD_STORE_QUEUE
     input logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_i,
-    // Number of entry freed in the load queue - LOAD_STORE_QUEUE
-    input logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_i,
     // Load store unit FU is valid - EX_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_o,
     // Mult FU is valid - EX_STAGE
@@ -638,9 +636,11 @@ module issue_stage
   logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_token_valid, st_token_valid;
   logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_we, st_we;
 
+  logic [CVA6Cfg.RollbackWidth-1:0]                           rollbacked_ld;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_token_valid;
+
   logic [TOKEN_W-1:0] ld_token_n, ld_token_q;
   logic [TOKEN_W-1:0] st_token_n, st_token_q;
-  logic [TOKEN_W-1:0] ld_return_token_q;
   logic [TOKEN_W-1:0] st_return_token_q;
 
 
@@ -648,17 +648,16 @@ module issue_stage
     assign ld_we[i] = issue_instr_sb_iro[i].fu == LOAD & rm_i[i];
     assign st_we[i] = issue_instr_sb_iro[i].fu == STORE & rm_i[i];
     assign lsq_bypass_we[i] = (decoded_instr_i[i].fu == STORE || decoded_instr_i[i].fu == LOAD) & decoded_instr_valid_i[i];
+    assign lsq_token_valid[i] = decoded_instr_i[i].fu == LOAD  ? ld_token_valid[i] : 1'b1;
   end
+
 
   always_comb begin
-    lsq_tournament_valid[0] = lsq_dispatch_instr[0].fu == LOAD ? ld_token_valid[0] & lsq_dispatch_instr_valid[0]
-      : st_token_valid[0] & lsq_dispatch_instr_valid[0];
+    lsq_tournament_valid[0] = lsq_dispatch_instr_valid[0] && (lsq_dispatch_instr[0].fu == LOAD || st_token_valid[0]);
     for (int unsigned i = 1; i< CVA6Cfg.NrIssuePorts; i++ ) begin
-      lsq_tournament_valid[i] = (lsq_dispatch_instr[i].fu == LOAD ? ld_token_valid[i] & lsq_dispatch_instr_valid[i]
-      : st_token_valid[i] & lsq_dispatch_instr_valid[i]) & lsq_tournament_valid[i-1];
+      lsq_tournament_valid[i] = lsq_dispatch_instr_valid[i] & lsq_tournament_valid[i-1] & (lsq_dispatch_instr[i].fu == LOAD || st_token_valid[i]);
     end
   end
-
 
 
   always_comb begin : lsq_write_enable
@@ -666,9 +665,20 @@ module issue_stage
     automatic logic [TOKEN_W-1:0] ld_token, ld_speculative_token;
     automatic logic [TOKEN_W-1:0] st_token, st_speculative_token;
 
+    ld_token = ld_token_q;
+
+    if (wb_valid_o[LOAD_WB]) begin
+      ld_token = ld_token + 1'b1;
+    end
+
+    for (int unsigned i = 0; i < CVA6Cfg.RollbackWidth; i++) begin
+      if (rollbacked_ld[i] && rollback_we_i[i]) begin
+        ld_token = ld_token + 1'b1;
+      end
+    end
+
     // Incorporate credits returned during the PREVIOUS cycle.
     // It helps with long critical path
-    ld_token = ld_token_q + ld_return_token_q;
     st_token = st_token_q + st_return_token_q;
 
     ld_token_valid = '0;
@@ -678,20 +688,24 @@ module issue_stage
     st_speculative_token = st_token;
 
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (ld_speculative_token > 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr[i].fu == LOAD) begin
+      if (ld_speculative_token != 0 && decoded_instr_valid_i[i] && decoded_instr_i[i].fu == LOAD) begin
         ld_token_valid[i] = 1'b1;
         ld_speculative_token = ld_speculative_token - 1'b1;
-      end else if (st_speculative_token > 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr[i].fu == STORE) begin
+      end
+
+      if (st_speculative_token != 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr[i].fu == STORE) begin
         st_token_valid[i] = 1'b1;
         st_speculative_token = st_speculative_token - 1'b1;
       end
     end
 
-    // Tokens are actually consumed only when IRO accepts the instruction.
+    // Tokens are consumed only when accepted by lsq_bypass
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (rm_i[i] && issue_instr_sb_iro[i].fu == LOAD) begin
+      if (decoded_instr_valid_i[i] && decoded_instr_i[i].fu == LOAD && decoded_instr_ack_o[i]) begin
         ld_token = ld_token - 1'b1;
-      end else if (rm_i[i] && issue_instr_sb_iro[i].fu == STORE) begin
+      end
+
+      if (rm_i[i] && issue_instr_sb_iro[i].fu == STORE) begin
         st_token = st_token - 1'b1;
       end
     end
@@ -704,17 +718,14 @@ module issue_stage
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       ld_token_q        <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
-      ld_return_token_q <= '0;
       st_token_q        <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
       st_return_token_q <= '0;
     end else if (flush_i) begin
       ld_token_q        <= TOKEN_W'(CVA6Cfg.NrLSQEntries);
-      ld_return_token_q <= '0;
       st_token_q        <= st_token_n;
       st_return_token_q <= st_return_token_i;
     end else begin
       ld_token_q        <= ld_token_n;
-      ld_return_token_q <= ld_return_token_i;
       st_token_q        <= st_token_n;
       st_return_token_q <= st_return_token_i;
     end
@@ -844,11 +855,11 @@ module issue_stage
   always_comb begin : instr_ack_update
     //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
     decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ?
-        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || (lsq_bypass_we[0] & lsq_bypass_full[0])) ? 1'b0 :
+        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || (lsq_bypass_we[0] & (!lsq_token_valid[0] || lsq_bypass_full[0]))) ? 1'b0 :
       (issue_instr_ack[0] && !final_rs_full[0])) : 1'b0;
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
       decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ?
-          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || (lsq_bypass_we[i] & lsq_bypass_full[i])) ? 1'b0 :
+          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || (lsq_bypass_we[i] & (!lsq_token_valid[i] || lsq_bypass_full[i]))) ? 1'b0 :
         (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1])) : 1'b0;
     end
   end
@@ -913,6 +924,7 @@ module issue_stage
       .rvfi_issue_pointer_o,
       .rvfi_commit_pointer_o,
       .lsu_valid_i             (lsu_valid_o),
+      .rollbacked_ld_o         (rollbacked_ld),
       .rollback_rd_o           (rollback_rd_i),
       .rollback_id_o,
       .rollback_old_phys_o     (rollback_old_phys_i),
@@ -930,8 +942,9 @@ module issue_stage
   );
 
   // ---------------------------------------------------------
-  // 3. Issue instruction and read operand, also commit
+  // 6. Issue instruction and read operands
   // ---------------------------------------------------------
+
   issue_read_operands #(
       .CVA6Cfg(CVA6Cfg),
       .branchpredict_sbe_t(branchpredict_sbe_t),
@@ -1009,5 +1022,20 @@ module issue_stage
       .rvfi_rs1_o              (rvfi_rs1_o),
       .rvfi_rs2_o              (rvfi_rs2_o)
   );
+
+  //pragma translate_off
+
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+    assert property (
+        @(posedge clk_i) disable iff (!rst_ni)
+        decoded_instr_valid_i[i]
+        && decoded_instr_ack_o[i]
+        && decoded_instr_i[i].fu == LOAD
+        |->
+        ld_token_valid[i] && !lsq_bypass_full[i]
+    );
+  end
+
+  //pragma translate_on
 
 endmodule

@@ -459,7 +459,6 @@ module cva6
   logic [CVA6Cfg.NrIssuePorts-1:0]                           vaddr_valid_id_ex;
   logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_ex_id;
   logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_ex_id;
-  logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] ld_return_token_ex_id;
 
 
 
@@ -891,7 +890,6 @@ module cva6
       // LSU
       .lsq_full_i(lsq_full_ex_id),
       .st_return_token_i(st_return_token_ex_id),
-      .ld_return_token_i(ld_return_token_ex_id),
       .ld_we_o(ld_we_id_ex),
       .st_we_o(st_we_id_ex),
       .data_trans_id_o(data_trans_id_id_ex),
@@ -1019,7 +1017,6 @@ module cva6
       .csr_trans_id_i(commit_csr_trans_id_o),
       .lsq_full_o(lsq_full_ex_id),
       .st_return_token_o(st_return_token_ex_id),
-      .ld_return_token_o(ld_return_token_ex_id),
       .decoded_instr_valid_i(issue_entry_valid_id_issue),
       .decoded_instr_ack_i(issue_instr_issue_id),
       .ld_we_i(ld_we_id_ex),
