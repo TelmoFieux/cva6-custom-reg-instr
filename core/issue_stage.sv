@@ -736,7 +736,7 @@ module issue_stage
     .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
     .FPR_ENABLED        (CVA6Cfg.FpPresent),
     .NR_ENTRIES         (CVA6Cfg.NrLSQBypassEntries),
-    .FALLTHROUGH        (1'b0),
+    .FALLTHROUGH        (1'b1),
     .scoreboard_entry_t (scoreboard_entry_t),
     .lsq_data_t (lsq_data_t)
   ) i_lsq_bypass (

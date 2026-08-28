@@ -313,9 +313,9 @@ module issue_read_operands
             fus_busy[1].ctrl_flow = 1'b1;
             fus_busy[1].csr = 1'b1;
             // Speculative non-idempotent loads are not supported yet
-            fus_busy[1].load = 1'b1;
+            //fus_busy[1].load = 1'b1;
             // The store buffer cannot be partially flushed yet
-            fus_busy[1].store = 1'b1;
+            //fus_busy[1].store = 1'b1;
           end else begin
             // There are no branch misses on a JAL
             if (issue_instr_i[0].op == ariane_pkg::ADD) begin

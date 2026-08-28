@@ -446,6 +446,7 @@ end
   end
 
   always_comb begin : rollback
+
     state_n        = state_q;
     rollback_pointer_n = rollback_pointer_q;
     bmiss_trans_id_n  = bmiss_trans_id_q;
@@ -483,13 +484,18 @@ end
         end
         WALKBACK : begin
           for (int unsigned i = 0 ; i < CVA6Cfg.RollbackWidth ; i++) begin
+            automatic logic same_load_wb;
             automatic logic [CVA6Cfg.TRANS_ID_BITS-1:0] rollback_index;
             rollback_index = rollback_pointer_q - i;
+
+            same_load_wb = wt_valid_i[LOAD_WB] && trans_id_i[LOAD_WB] == rollback_index &&
+              mem_q[rollback_index].issued && mem_q[rollback_index].sbe.global_rs_id == global_id_i[LOAD_WB];
+
             rollback_rd_o[i] = mem_q[rollback_index].sbe.rd;
             rollback_id_o[i] = mem_q[rollback_index].sbe.global_rs_id;
             rollback_we_o[i] = mem_q[rollback_index].issued && state_n != NORMAL;
             rollbacked_ld_o[i] = mem_q[rollback_index].sbe.fu == LOAD && !mem_q[rollback_index].sbe.valid
-                                 && !mem_q[rollback_index].sbe.ex.valid && !wt_valid_i[LOAD_WB];
+                                 && !mem_q[rollback_index].sbe.ex.valid && !same_load_wb && rollback_we_o[i];
             rollback_store_buffer_o[i] = (mem_q[rollback_index].store_dispatched || (store_dispatched_i && store_dispatched_id_i == rollback_index)) && state_n != NORMAL;
             rollback_ex_o[i] = mem_q[rollback_index].issued && state_n != NORMAL;
             rollback_old_phys_o[i] = mem_q[rollback_index].sbe.old_phys;
