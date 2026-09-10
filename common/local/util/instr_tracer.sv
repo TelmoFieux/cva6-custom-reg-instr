@@ -53,253 +53,184 @@ module instr_tracer #(
   input logic[CVA6Cfg.XLEN-1:0] hart_id_i
 );
 
-
-
-  // keep the decoded instructions in a queue
-  logic [31:0] decode_queue [$];
-  // keep the issued instructions in a queue
-  logic [31:0] issue_queue [$];
-  // issue scoreboard entries
-  scoreboard_entry_t issue_sbe_queue [$];
-  scoreboard_entry_t issue_sbe_item;
-  // store resolved branches, get (mis-)predictions
-  bp_resolve_t bp [$];
-  // shadow copy of the register files
-  logic [63:0] gp_reg_file [2 ** CVA6Cfg.RegAddrWidth];
-  logic [63:0] fp_reg_file [2 ** CVA6Cfg.RegAddrWidth];
-  // 64 bit clock tick count
+  int f;
   longint unsigned clk_ticks;
-  int f, commit_log;
-  // address mapping
-  // contains mappings of the form vaddr <-> paddr
-  logic [63:0] store_mapping[$], load_mapping[$], address_mapping;
+  longint unsigned commit_count;
 
-  // static uvm_cmdline_processor uvcl = uvm_cmdline_processor::get_inst();
+  int f_arch;
+  int f_debug;
+
 
   function void create_file(logic [63:0] hart_id);
-    string fn, fn_commit_log;
-    $sformat(fn, "trace_hart_%0.0f.log", hart_id);
-    $sformat(fn_commit_log, "trace_hart_%0.0f_commit.log", hart_id);
-    $display("[TRACER] Output filename is: %s", fn);
 
-    f = $fopen(fn,"w");
-    if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG) commit_log = $fopen(fn_commit_log, "w");
-  endfunction : create_file
+      string fn_arch;
+      string fn_debug;
 
-  task trace();
-    automatic logic [31:0] decode_instruction, issue_instruction, issue_commit_instruction;
-    automatic scoreboard_entry_t commit_instruction;
-    // initialize register 0
-    gp_reg_file  = '{default:0};
-    fp_reg_file  = '{default:0};
+      $sformat(
+          fn_arch,
+          "trace_hart_%0.0f_arch.log",
+          hart_id
+      );
 
-    forever begin
-      automatic bp_resolve_t bp_instruction = '0;
-      // new cycle, we are only interested if reset is de-asserted
-      @(pck) if (rstn !== 1'b1) begin
-        flush();
-        continue;
+      $sformat(
+          fn_debug,
+          "trace_hart_%0.0f_debug.log",
+          hart_id
+      );
+
+      $display("[TRACER] Arch trace : %s", fn_arch);
+      $display("[TRACER] Debug trace: %s", fn_debug);
+
+      f_arch  = $fopen(fn_arch,  "w");
+      f_debug = $fopen(fn_debug, "w");
+
+  endfunction
+
+  function automatic void printCommit(
+      input int unsigned port,
+      input scoreboard_entry_t sbe
+  );
+
+      // -------------------------------------------------------
+      // Architectural trace
+      //
+      // Ne pas mettre :
+      // - time
+      // - cycle
+      // - trans_id
+      // - global_rs_id
+      // - physical registers
+      //
+      // afin de pouvoir faire un diff direct entre deux runs.
+      // -------------------------------------------------------
+
+      if (sbe.arch_rd != '0) begin
+          $fwrite(
+              f_arch,
+              "%0d pc=%h fu=%0d op=%0d arch_rd=%0d result=%h ex=%0b\n",
+              commit_count,
+              sbe.pc,
+              sbe.fu,
+              sbe.op,
+              sbe.arch_rd,
+              sbe.result,
+              sbe.ex.valid
+          );
+      end else begin
+          $fwrite(
+              f_arch,
+              "%0d pc=%h fu=%0d op=%0d arch_rd=0 result=00000000 ex=%0b\n",
+              commit_count,
+              sbe.pc,
+              sbe.fu,
+              sbe.op,
+              sbe.ex.valid
+          );
       end
 
-      // increment clock tick
-      clk_ticks++;
 
-      // -------------------
-      // Instruction Decode
-      // -------------------
-      // we are decoding an instruction
-      if (fetch_valid && fetch_ack) begin
-        decode_instruction = instruction;
-        decode_queue.push_back(decode_instruction);
-      end
-      // -------------------
-      // Instruction Issue
-      // -------------------
-      // we got a new issue ack, so put the element from the decode queue to
-      // the issue queue
-      if (issue_ack && !flush_unissued) begin
-        issue_instruction = decode_queue.pop_front();
-        issue_queue.push_back(issue_instruction);
-        // also save the scoreboard entry to a separate issue queue
-        issue_sbe_queue.push_back(scoreboard_entry_t'(issue_sbe));
-      end
+      // -------------------------------------------------------
+      // Detailed microarchitectural trace
+      // -------------------------------------------------------
 
-      // --------------------
-      // Address Translation
-      // --------------------
-      if (st_valid) begin
-        store_mapping.push_back(st_paddr);
-      end
+      $fwrite(
+          f_debug,
+          "ord=%0d time=%0t cycle=%0d port=%0d pc=%h valid=%0b fu=%0d op=%0d arch_rd=%0d rd=%0d old_phys=%0d rs1=%0d rs2=%0d tid=%0d gid=%0d result=%h ex_valid=%0b ex_cause=%0d ex_tval=%h SBE=%p\n",
 
-      if (ld_valid && !ld_kill) begin
-        load_mapping.push_back(ld_paddr);
-      end
-      // ----------------------
-      // Store predictions
-      // ----------------------
-      if (resolve_branch.valid) begin
-        bp.push_back(resolve_branch);
-      end
-      // --------------
-      //  Commit
-      // --------------
-      // we are committing an instruction
-      for (int i = 0; i < 2; i++) begin
-        if (commit_ack[i]) begin
-          commit_instruction = scoreboard_entry_t'(commit_instr[i]);
-          issue_commit_instruction = issue_queue.pop_front();
-          issue_sbe_item = issue_sbe_queue.pop_front();
-          // check if the instruction retiring is a load or store, get the physical address accordingly
-          if (commit_instr[i].fu == ariane_pkg::LOAD)
-            address_mapping = load_mapping.pop_front();
-          else if (commit_instr[i].fu == ariane_pkg::STORE)
-            address_mapping = store_mapping.pop_front();
-
-          if (commit_instr[i].fu == ariane_pkg::CTRL_FLOW)
-            bp_instruction = bp.pop_front();
-          // the scoreboards issue entry still contains the immediate value as a result
-          // check if the write back is valid, if not we need to source the result from the register file
-          // as the most recent version of this register will be there.
-          if (we_gpr[i] || we_fpr[i]) begin
-            printInstr(issue_sbe_item, issue_commit_instruction, wdata[i], address_mapping, priv_lvl, debug_mode, bp_instruction);
-          end else if (ariane_pkg::is_rd_fpr(commit_instruction.op)) begin
-            printInstr(issue_sbe_item, issue_commit_instruction, fp_reg_file[commit_instruction.rd], address_mapping, priv_lvl, debug_mode, bp_instruction);
-          end else begin
-            printInstr(issue_sbe_item, issue_commit_instruction, gp_reg_file[commit_instruction.rd], address_mapping, priv_lvl, debug_mode, bp_instruction);
-          end
-        end
-      end
-      // --------------
-      // Exceptions
-      // --------------
-      if (commit_exception.valid && !(debug_mode && commit_exception.cause == riscv::BREAKPOINT)) begin
-        // print exception
-        printException(commit_instr[0].pc, commit_exception.cause, commit_exception.tval);
-        $display(
-          "[EXCEPTION] time=%0t cycle=%0d pc=%h cause=%0d tval=%h fu=%0d op=%0d tid=%0d",
+          commit_count,
           $time,
           clk_ticks,
-          commit_instr[0].pc,
-          commit_exception.cause,
-          commit_exception.tval,
-          commit_instr[0].fu,
-          commit_instr[0].op,
-          commit_instr[0].trans_id
-        );
-      end
-      // ----------------------
-      // Commit Registers
-      // ----------------------
-      // update shadow reg files here
-      for (int i = 0; i < 2; i++) begin
-        if (we_gpr[i] && waddr[i] != '0) begin
-          gp_reg_file[waddr[i]] = wdata[i];
-        end else if (we_fpr[i]) begin
-          fp_reg_file[waddr[i]] = wdata[i];
+          port,
+
+          sbe.pc,
+          sbe.valid,
+
+          sbe.fu,
+          sbe.op,
+
+          sbe.arch_rd,
+
+          sbe.rd,
+          sbe.old_phys,
+
+          sbe.rs1,
+          sbe.rs2,
+
+          sbe.trans_id,
+          sbe.global_rs_id,
+
+          sbe.result,
+
+          sbe.ex.valid,
+          sbe.ex.cause,
+          sbe.ex.tval,
+
+          sbe
+      );
+
+  endfunction
+
+  task trace();
+
+    clk_ticks    = 0;
+    commit_count = 0;
+
+    forever begin
+
+        @(posedge pck);
+
+        if (rstn !== 1'b1) begin
+            clk_ticks = 0;
+            continue;
         end
-      end
-      // --------------
-      // Flush Signals
-      // --------------
-      // flush un-issued instructions
-      if (flush_unissued) begin
-        flushDecode();
-      end
-      // flush whole pipeline
-      if (flush_all) begin
-        flush();
-      end
+
+        clk_ticks++;
+
+        for (int unsigned i = 0; i < 2; i++) begin
+
+            if (commit_ack[i]) begin
+
+                printCommit(
+                    i,
+                    scoreboard_entry_t'(commit_instr[i])
+                );
+
+                commit_count++;
+
+            end
+        end
+
+
+        if (
+            commit_exception.valid &&
+            !(debug_mode &&
+              commit_exception.cause == riscv::BREAKPOINT)
+        ) begin
+
+            $fwrite(
+                f_debug,
+                "EXCEPTION time=%0t cycle=%0d pc=%h cause=%0d tval=%h\n",
+                $time,
+                clk_ticks,
+                commit_instr[0].pc,
+                commit_exception.cause,
+                commit_exception.tval
+            );
+
+        end
+
     end
 
   endtask
 
-  // flush all decoded instructions
-  function void flushDecode ();
-    decode_queue = {};
-  endfunction
-
-  // flush everything, we took an exception/interrupt
-  function void flush ();
-    flushDecode();
-    // clear all elements in the queue
-    issue_queue     = {};
-    issue_sbe_queue = {};
-    // also clear mappings
-    store_mapping   = {};
-    load_mapping    = {};
-    bp              = {};
-  endfunction
-
- function automatic void printInstr(
-    scoreboard_entry_t sbe,
-    logic [31:0] instr,
-    logic [63:0] result,
-    logic [CVA6Cfg.PLEN-1:0] paddr,
-    riscv::priv_lvl_t priv_lvl,
-    logic debug_mode,
-    bp_resolve_t bp
-  );
-
-      automatic instr_trace_item #(
-          .CVA6Cfg(CVA6Cfg),
-          .bp_resolve_t(bp_resolve_t),
-          .scoreboard_entry_t(scoreboard_entry_t)
-      ) iti = new(
-          $time,
-          clk_ticks,
-          sbe,
-          instr,
-          gp_reg_file,
-          fp_reg_file,
-          result,
-          paddr,
-          priv_lvl,
-          debug_mode,
-          bp
-      );
-
-      automatic string print_instr = iti.printInstr();
-
-      if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && !debug_mode) begin
-          $fwrite(
-              commit_log,
-              riscv::spikeCommitLog(
-                  sbe.pc,
-                  priv_lvl,
-                  instr,
-                  sbe.rd,
-                  result,
-                  ariane_pkg::is_rd_fpr(sbe.op)
-              )
-          );
-      end
-
-      $fwrite(f, {print_instr, "\n"});
-  endfunction
-
-  function automatic void printException(
-      logic [CVA6Cfg.VLEN-1:0] pc,
-      logic [63:0] cause,
-      logic [63:0] tval
-  );
-
-      automatic ex_trace_item #(
-          .CVA6Cfg(CVA6Cfg),
-          .interrupts_t(interrupts_t),
-          .INTERRUPTS(INTERRUPTS)
-      ) eti = new(pc, cause, tval);
-
-      automatic string print_ex = eti.printException();
-
-      $fwrite(f, {print_ex, "\n"});
-  endfunction
-
   function void close();
-    if (f)
-      $fclose(f);
 
-    if (ariane_pkg::ENABLE_SPIKE_COMMIT_LOG && commit_log)
-      $fclose(commit_log);
+      if (f_arch)
+          $fclose(f_arch);
+
+      if (f_debug)
+          $fclose(f_debug);
+
   endfunction
 
 

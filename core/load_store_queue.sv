@@ -149,23 +149,16 @@ module load_store_queue
     return (diff[CVA6Cfg.GlobalRsIdWidth-1] == 1'b0) && (diff != '0);
   endfunction
 
+  localparam BEAT_IDX = $clog2(CVA6Cfg.XLEN/8);
 
-  function automatic logic overlap_check(fu_op op_a, logic [CVA6Cfg.PLEN-1:0] paddr_a, fu_op op_b, logic [CVA6Cfg.PLEN-1:0] paddr_b);
-      logic [1:0] data_size_a;
-      logic [1:0] data_size_b;
+  function automatic logic overlap_check(logic [(CVA6Cfg.XLEN/8)-1:0] be_a, logic [CVA6Cfg.PLEN-1:0] paddr_a, logic [(CVA6Cfg.XLEN/8)-1:0] be_b, logic [CVA6Cfg.PLEN-1:0] paddr_b);
+      logic same_beat;
+      logic overlap;
 
-      logic [CVA6Cfg.PLEN:0] end_a;
-      logic [CVA6Cfg.PLEN:0] end_b;
+      same_beat = paddr_a[CVA6Cfg.PLEN-1:BEAT_IDX] == paddr_b[CVA6Cfg.PLEN-1:BEAT_IDX];
+      overlap = |(be_a & be_b);
 
-      data_size_a = extract_transfer_size(op_a);
-      data_size_b = extract_transfer_size(op_b);
-
-      // Bornes exclusives
-      end_a = {1'b0, paddr_a} + (1 << data_size_a);
-      end_b = {1'b0, paddr_b} + (1 << data_size_b);
-
-      return ({1'b0, paddr_a} < end_b) &&
-            ({1'b0, paddr_b} < end_a);
+      return overlap && same_beat;
   endfunction
 
   typedef struct packed {
@@ -361,7 +354,7 @@ module load_store_queue
     ld_rollback_mask = '0;
     for (int unsigned i = 0; i < LSQ_DEPTH; i++) begin
       for (int unsigned j = 0; j < CVA6Cfg.RollbackWidth; j++) begin
-        if (rollback_i[j] && ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j]) begin
+        if (rollback_i[j] && ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j] && ld_queue_q.reserved[i]) begin
           ld_rollback_mask[i] = 1'b1;
         end
       end
@@ -905,7 +898,7 @@ module load_store_queue
         ld_queue_n.ready[ld_ready_pointer] = 1'b0;
         ld_queue_n.issued[ld_ready_pointer] = 1'b1;
       end
-    end else if (!ld_ready_pointer_valid_q & ld_ready_pointer_valid & !ldbuf_full_i) begin
+    end else if (!ld_ready_pointer_valid_q & ld_ready_pointer_valid & !ldbuf_full_i & !ld_rollback_mask[ld_ready_pointer]) begin
       ld_ready_pointer_n = ld_ready_pointer;
       ld_ready_pointer_valid_n = '1;
     end
@@ -1338,7 +1331,7 @@ module load_store_queue
   assign ld_unit_lsu_ctrl_o = ld_queue_q.instr[ld_selected_pointer];
   assign ld_unit_paddr_o = ld_paddr[ld_selected_pointer];
   assign ld_unit_idx_o = ld_selected_pointer;
-  assign ld_unit_valid_o = (ld_ready_pointer_valid_q || ld_ready_pointer_valid) && !ldbuf_full_i && !flush_i && !ld_selected_rollback;;
+  assign ld_unit_valid_o = (ld_ready_pointer_valid_q || ld_ready_pointer_valid) && !ldbuf_full_i && !flush_i && !ld_selected_rollback;
 
 
   always_comb begin : adress_dependencies
@@ -1372,9 +1365,9 @@ module load_store_queue
       if(ld_paddr_valid[i]) begin
         for (int unsigned j = 0; j<LSQ_DEPTH; j ++) begin
           if(st_paddr_valid[j]) begin
-            if (ld_paddr[i] == st_paddr[j] && extract_transfer_size(st_queue_q.instr[j].operation) == extract_transfer_size(ld_queue_q.instr[i].operation)) begin
+            if (ld_paddr[i] == st_paddr[j] && st_queue_q.instr[j].be == ld_queue_q.instr[i].be) begin
               comb_matching_addr[i][j] = 1'b1;
-            end else if (overlap_check(ld_queue_q.instr[i].operation, ld_paddr[i], st_queue_q.instr[j].operation, st_paddr[j])) begin
+            end else if (overlap_check(ld_queue_q.instr[i].be, ld_paddr[i], st_queue_q.instr[j].be, st_paddr[j])) begin
               comb_partial_matching_addr[i][j] = 1'b1;
             end
           end else begin

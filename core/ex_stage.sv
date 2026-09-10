@@ -580,7 +580,7 @@ module ex_stage
   //assembling wb_data just like in the cva6 file
   assign wb_trans_id[FLU_WB] = flu_trans_id_o;
   assign wbdata[FLU_WB]   = flu_result_o;
-  assign wt_valid[FLU_WB] = flu_valid_o;
+  assign wt_valid[FLU_WB] = flu_valid_o && !(|csr_valid_i);
 
   // Registered CSR snoop
   assign wb_trans_id[STORE_WB] = csr_snoop_trans_id_q;

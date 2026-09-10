@@ -132,6 +132,33 @@ module load_unit
     end
   endgenerate
 
+
+  logic [CVA6Cfg.NrLoadBufEntries-1:0] ldbuf_rollback_mask;
+
+  always_comb begin
+    ldbuf_rollback_mask = '0;
+
+    for (int unsigned i = 0; i < CVA6Cfg.NrLoadBufEntries; i++) begin
+      for (int unsigned j = 0; j < CVA6Cfg.RollbackWidth; j++) begin
+        if (ldbuf_valid_q[i] && rollback_i[j] && ldbuf_q[i].trans_id == rollback_trans_id_i[j]) begin
+          ldbuf_rollback_mask[i] = 1'b1;
+        end
+      end
+    end
+  end
+
+  logic ldbuf_w_rollback;
+
+  always_comb begin
+    ldbuf_w_rollback = 1'b0;
+
+    for (int unsigned j = 0; j < CVA6Cfg.RollbackWidth; j++) begin
+      if (rollback_i[j] & ldbuf_wdata.trans_id == rollback_trans_id_i[j]) begin
+        ldbuf_w_rollback = 1'b1;
+      end
+    end
+  end
+
   assign ldbuf_windex = (LDBUF_FALLTHROUGH && ldbuf_r) ? ldbuf_rindex : ldbuf_free_index;
 
   always_comb begin : ldbuf_comb
@@ -148,20 +175,22 @@ module load_unit
     if (ldbuf_r && (!LDBUF_FALLTHROUGH || !ldbuf_w)) begin
       ldbuf_valid_d[ldbuf_rindex] = 1'b0;
     end
-    //  Track a new outstanding operation in the load buffer
-    if (ldbuf_w) begin
-      ldbuf_flushed_d[ldbuf_windex] = 1'b0;
-      ldbuf_valid_d[ldbuf_windex]   = 1'b1;
-    end
 
     // squash entry on rollback
     for (int unsigned i = 0; i < CVA6Cfg.NrLoadBufEntries; i++) begin
-      for (int unsigned j = 0 ; j<CVA6Cfg.RollbackWidth ; j++) begin
-        if (ldbuf_valid_q[i] && ldbuf_q[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
-          ldbuf_flushed_d[i] = '1;
-        end
-      end
+      if (ldbuf_rollback_mask[i]) ldbuf_flushed_d[i] = 1'b1;
     end
+
+    //  Track a new outstanding operation in the load buffer
+    if (ldbuf_w) begin
+      ldbuf_valid_d[ldbuf_windex] = 1'b1;
+
+      if (ldbuf_w_rollback)
+        ldbuf_flushed_d[ldbuf_windex] = 1'b1;
+      else
+        ldbuf_flushed_d[ldbuf_windex] = 1'b0;
+    end
+
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : ldbuf_ff
@@ -268,7 +297,7 @@ module load_unit
         unique case (state_q)
           WAIT_GNT : begin
             state_d = IDLE;
-            req_port_o.data_req = 1'b0;
+            // req_port_o.data_req = 1'b0;
           end
           SEND_TAG : begin
             state_d = IDLE;
@@ -310,7 +339,7 @@ module load_unit
     ld_unit_idx_o = ldbuf_q[ldbuf_rindex].ldq_idx;
 
     // we got an rvalid and it's corresponding request was not flushed
-    if (req_port_i.data_rvalid && !ldbuf_flushed_q[ldbuf_rindex]) begin
+    if (req_port_i.data_rvalid && ldbuf_valid_q[ldbuf_rindex] && !ldbuf_flushed_q[ldbuf_rindex] && !ldbuf_rollback_mask[ldbuf_rindex]) begin
       // if the response corresponds to the last request, check that we are not killing it
       if ((ldbuf_last_id_q != ldbuf_rindex) || !req_port_o.kill_req) valid_o = 1'b1;
     end
@@ -425,6 +454,13 @@ module load_unit
   assert property (@(posedge clk_i) disable iff (~rst_ni)
         ldbuf_w |->  (ldbuf_wdata.operation inside {ariane_pkg::LB, ariane_pkg::LBU}) |-> ldbuf_wdata.address_offset < 8)
   else $fatal(1, "invalid address offset used with {LB, LBU}");
+
+  assert property (
+      @(posedge clk_i) disable iff (!rst_ni)
+      req_port_i.data_rvalid && !ldbuf_valid_q[ldbuf_rindex]
+      |-> !valid_o
+  );
+
   //pragma translate_on
 
 endmodule

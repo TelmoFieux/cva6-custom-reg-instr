@@ -231,6 +231,7 @@ module issue_stage
   logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.RegAddrWidth-1:0] wbaddr_o;
   logic [CVA6Cfg.NrWbPorts-1:0] gpr_we_o;
   logic [CVA6Cfg.NrWbPorts-1:0] fpr_we_o;
+  logic [CVA6Cfg.NrIssuePorts-1:0] decoded_instr_ready;
 
   assign stall_issue_o = '0;
 
@@ -426,8 +427,9 @@ module issue_stage
   end
 
   always_comb begin : reg_sel
-    logic [CVA6Cfg.GlobalRsIdWidth-1:0] id_counter;
+    logic [CVA6Cfg.GlobalRsIdWidth-1:0] id_counter, speculative_id_counter;
     id_counter = global_rs_id_q;
+    speculative_id_counter = global_rs_id_q;
 
     if (CVA6Cfg.FpPresent) begin
       renamed_instr_i = decoded_instr_i;
@@ -442,14 +444,19 @@ module issue_stage
       renamed_instr_i = gpr_renamed_instr_i;
     end
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        renamed_instr_i[i].global_rs_id = id_counter;
+        renamed_instr_i[i].global_rs_id = speculative_id_counter;
         renamed_instr_i[i].trans_id     = rvfi_issue_pointer_o[i];
-        if (decoded_instr_ack_o[i]) begin
-            id_counter = id_counter + 1;
+        if (decoded_instr_ready[i]) begin
+            speculative_id_counter = speculative_id_counter + 1;
+        end
+
+        if(decoded_instr_ack_o[i]) begin
+          id_counter = id_counter + 1;
         end
     end
 
     global_rs_id_n = id_counter;
+
   end
 
   // ---------------------------------------------------------
@@ -671,12 +678,6 @@ module issue_stage
       ld_token = ld_token + 1'b1;
     end
 
-    for (int unsigned i = 0; i < CVA6Cfg.RollbackWidth; i++) begin
-      if (rollbacked_ld[i] && rollback_we_i[i]) begin
-        ld_token = ld_token + 1'b1;
-      end
-    end
-
     // Incorporate credits returned during the PREVIOUS cycle.
     // It helps with long critical path
     st_token = st_token_q + st_return_token_q;
@@ -707,6 +708,13 @@ module issue_stage
 
       if (rm_i[i] && issue_instr_sb_iro[i].fu == STORE) begin
         st_token = st_token - 1'b1;
+      end
+    end
+
+    //rollback after valid token computation
+    for (int unsigned i = 0; i < CVA6Cfg.RollbackWidth; i++) begin
+      if (rollbacked_ld[i] && rollback_we_i[i]) begin
+        ld_token = ld_token + 1'b1;
       end
     end
 
@@ -762,6 +770,7 @@ module issue_stage
     .data_trans_id_i            (data_trans_id),
     .decoded_instr_i            (renamed_instr_i),
     .decoded_instr_ack_i        (decoded_instr_ack_o),
+    .decoded_instr_ready_i      (decoded_instr_ready),
     .decoded_instr_valid_i      (decoded_instr_valid_i)
   );
 
@@ -853,14 +862,18 @@ module issue_stage
   end
 
   always_comb begin : instr_ack_update
-    //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
-    decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) ?
-        ((empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || (lsq_bypass_we[0] & (!lsq_token_valid[0] || lsq_bypass_full[0]))) ? 1'b0 :
-      (issue_instr_ack[0] && !final_rs_full[0])) : 1'b0;
+
+    decoded_instr_ready[0] = !(empty_gpr[0] && issue_we_i[0] || empty_fpr[0] && issue_fpr_we_i[0] || (lsq_bypass_we[0] & (!lsq_token_valid[0] || lsq_bypass_full[0]))) &
+      (issue_instr_ack[0] && !final_rs_full[0]);
+
     for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
-      decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) ?
-          ((empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || (lsq_bypass_we[i] & (!lsq_token_valid[i] || lsq_bypass_full[i]))) ? 1'b0 :
-        (issue_instr_ack[i] && !final_rs_full[i] && decoded_instr_ack_o[i-1])) : 1'b0;
+      decoded_instr_ready[i] = !(empty_gpr[i] && issue_we_i[i] || empty_fpr[i] && issue_fpr_we_i[i] || (lsq_bypass_we[i] & (!lsq_token_valid[i] || lsq_bypass_full[i]))) &
+        (issue_instr_ack[i] && !final_rs_full[i]) & decoded_instr_ready[i-1];
+    end
+    //if rs, rat and scoreboard succesfully added the instr we validate the Handshake
+    decoded_instr_ack_o[0] = (!flush_unissued_instr_i && !flush_i) & decoded_instr_ready[0];
+    for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++) begin
+      decoded_instr_ack_o[i] = (!flush_unissued_instr_i && !flush_i) & decoded_instr_ready[i];
     end
   end
 

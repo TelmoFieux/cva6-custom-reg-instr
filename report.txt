@@ -1,0 +1,17 @@
+Coverage Report Summary Data by file
+
+=================================================================================
+=== File: /home/telmo/Desktop/TER/cva6-custom-reg-instr/corev_apu/tb/ariane_testharness.sv
+=================================================================================
+    Enabled Coverage              Bins      Hits    Misses  Coverage
+    ----------------              ----      ----    ------  --------
+    Branches                         4         2         2    50.00%
+    Conditions                       6         0         6     0.00%
+    Statements                     164       162         2    98.78%
+    Toggles                      33062      3131     29931     9.47%
+
+
+TOTAL ASSERTION COVERAGE: 84.31%  ASSERTIONS: 1269
+
+Total Coverage By File (code coverage only, filtered view): 39.56%
+
