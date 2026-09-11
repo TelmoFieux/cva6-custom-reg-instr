@@ -371,11 +371,16 @@ module load_store_queue
 
   logic [CVA6Cfg.NrIssuePorts-1:0] vaddr_is_valid;
   logic [CVA6Cfg.NrIssuePorts-1:0] data_is_valid;
+  // only here to prevent same cycle translation in case of csr snooping
+  // to avoid timing issues
+  logic [CVA6Cfg.NrIssuePorts-1:0] vaddr_is_valid_fast;
+
 
   always_comb begin : lsu_req_creation
 
     vaddr_is_valid = '0;
     data_is_valid = '0;
+    vaddr_is_valid_fast = '0;
     st_data = '0;
 
     vaddr_xlen = '0;
@@ -389,11 +394,15 @@ module load_store_queue
       if (vaddr_valid_i[i]) begin
         vaddr_xlen[i] = $unsigned($signed(fu_data_i[i].imm) + $signed(fu_data_i[i].operand_a));
         vaddr_is_valid[i] = 1'b1;
+        vaddr_is_valid_fast[i] = 1'b1;
       end else begin
         for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
           if (wt_valid_i[j] && wb_trans_id_i[j] == vaddr_trans_id_i[i]) begin
             vaddr_xlen[i] = $unsigned($signed(fu_data_i[i].imm) + $signed(wbdata_i[j]));
             vaddr_is_valid[i] = 1'b1;
+            if (j != STORE_WB) begin
+              vaddr_is_valid_fast[i] = 1'b1;
+            end
           end
         end
       end
@@ -465,6 +474,9 @@ module load_store_queue
   logic [LSQ_DEPTH-1:0]                       st_snooped_g_overflow, ld_snooped_g_overflow;
   logic [LSQ_DEPTH-1:0][(CVA6Cfg.XLEN/8)-1:0] st_snooped_be, ld_snooped_be;
   logic [LSQ_DEPTH-1:0]                       st_snooped_we, ld_snooped_we;
+  // only here to prevent same cycle translation in case of csr snooping
+  // to avoid timing issues
+  logic [LSQ_DEPTH-1:0]                       st_snooped_fast, ld_snooped_fast;
 
   always_comb begin : data_snooping
 
@@ -482,11 +494,19 @@ module load_store_queue
     ld_snooped_g_overflow = '0;
     ld_snooped_be         = '0;
 
+    ld_snooped_fast       = '0;
+    st_snooped_fast       = '0;
+
 
     // Snooping CDB in case we are missing some data
     for ( int unsigned i = 0 ; i < LSQ_DEPTH ; i++) begin
       for (int unsigned j = 0 ; j < CVA6Cfg.NrWbPorts ; j++) begin
         if (wt_valid_i[j] && wb_trans_id_i[j] == st_queue_q.vaddr_trans_id[i] && st_queue_q.reserved[i] && !st_queue_q.vaddr_valid[i]) begin
+
+          if (j != STORE_WB) begin
+            st_snooped_fast[i]= 1'b1;
+          end
+
           st_snooped_vaddr_xlen[i] = $unsigned($signed(st_queue_q.result[i]) + $signed(wbdata_i[j]));
           st_snooped_we[i] = 1'b1;
           st_snooped_vaddr[i] = st_snooped_vaddr_xlen[i][CVA6Cfg.VLEN-1:0];
@@ -505,6 +525,11 @@ module load_store_queue
         end
 
         if (wt_valid_i[j] && wb_trans_id_i[j] == ld_queue_q.vaddr_trans_id[i] && ld_queue_q.reserved[i] && !ld_queue_q.vaddr_valid[i]) begin
+
+          if (j != STORE_WB) begin
+            ld_snooped_fast[i]= 1'b1;
+          end
+
           ld_snooped_vaddr_xlen[i] = $unsigned($signed(ld_queue_q.result[i]) + $signed(wbdata_i[j]));
           ld_snooped_we[i] = 1'b1;
           ld_snooped_vaddr[i] = ld_snooped_vaddr_xlen[i][CVA6Cfg.VLEN-1:0];
@@ -1146,7 +1171,7 @@ module load_store_queue
 
       // validity updated from currently reserved instr
       for (int unsigned j = 0 ; j < CVA6Cfg.NrIssuePorts ; j++) begin
-        if (vaddr_is_valid[j] & st_alloc_idx[j] == i & st_we_i[j] & !st_full[j]) begin
+        if (vaddr_is_valid[j] & vaddr_is_valid_fast[j] & st_alloc_idx[j] == i & st_we_i[j] & !st_full[j]) begin
           st_comb_vaddr_valid[i] = 1'b1;
           st_comb_lsu_ctrl_o[i] = decoded_req[j];
           st_comb_vaddr_o[i] = vaddr[j];
@@ -1157,7 +1182,7 @@ module load_store_queue
       end
 
       // validity updated from snooping after reserving an entry
-      if (st_snooped_we[i]) begin
+      if (st_snooped_fast[i] && st_snooped_we[i]) begin
         st_comb_vaddr_valid[i] = 1'b1;
         st_comb_lsu_ctrl_o[i] = st_queue_q.instr[i];
         st_comb_lsu_ctrl_o[i].overflow = st_snooped_overflow[i];
@@ -1182,7 +1207,7 @@ module load_store_queue
 
       // validity updated from currently reserved instr
       for (int unsigned j = 0 ; j < CVA6Cfg.NrIssuePorts ; j++) begin
-        if (vaddr_is_valid[j] & ld_alloc_idx[j] == i & ld_we_i[j] & !ld_full[j]) begin
+        if (vaddr_is_valid[j] & vaddr_is_valid_fast[j] & ld_alloc_idx[j] == i & ld_we_i[j] & !ld_full[j]) begin
           ld_comb_vaddr_valid[i] = 1'b1;
           ld_comb_lsu_ctrl_o[i] = decoded_req[j];
           ld_comb_vaddr_o[i] = vaddr[j];
@@ -1193,7 +1218,7 @@ module load_store_queue
       end
 
       // validity updated from snooping after reserving an entry
-      if (ld_snooped_we[i]) begin
+      if (ld_snooped_fast[i] && ld_snooped_we[i]) begin
         ld_comb_vaddr_valid[i] = 1'b1;
         ld_comb_lsu_ctrl_o[i] = ld_queue_q.instr[i];
         ld_comb_lsu_ctrl_o[i].overflow = ld_snooped_overflow[i];
