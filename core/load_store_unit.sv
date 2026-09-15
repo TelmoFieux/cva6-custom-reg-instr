@@ -97,12 +97,6 @@ module load_store_unit
     output logic store_valid_o,
     // Store exception - ISSUE_STAGE
     output exception_t store_exception_o,
-    // do we need to rollback the store buffer - SCOREBOARD
-    input logic [CVA6Cfg.RollbackWidth-1:0] store_rollback_i,
-    // Has a store been dispatched ? - SCOREBOARD
-    output logic store_dispatched_o,
-    // Store dispatched trans_id - SCOREBOARD
-    output logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_o,
 
 
     // Commit the first pending store - TO_BE_COMPLETED
@@ -709,9 +703,6 @@ module load_store_unit
 
     .rollback_i (lsu_rollback_i),
     .rollback_trans_id_i (lsu_rollback_trans_id_i),
-    .store_dispatched_id_o,
-    // TODO: je pense que store_dispatched_o n'est plus nécessaire dans ce design
-    //Je le laisse la pour le moment as a reminder qu'il faut modifier son calcule dans le scoreboard
 
     //LSQ write data
     .ld_we_i               (ld_we_i),

@@ -38,9 +38,6 @@ module load_store_queue
 
     input logic [CVA6Cfg.RollbackWidth-1:0]                                                      rollback_i, // architectural register to rollback
     input logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]                           rollback_trans_id_i, // rollback is enabled
-    // Store dispatched trans_id - SCOREBOARD
-    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                          store_dispatched_id_o, // je pense que c'est plus nécessaire dans ce design
-
 
 
     input logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_we_i,

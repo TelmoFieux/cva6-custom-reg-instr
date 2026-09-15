@@ -445,11 +445,8 @@ module cva6
   branchpredict_sbe_t branch_predict_id_ex;
   logic resolve_branch_ex_id;
   // LSU
-  logic [CVA6Cfg.RollbackWidth-1:0] rollback_store_buffer;
   logic [CVA6Cfg.RollbackWidth-1:0] rollback_ex;
   logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id;
-  logic store_dispatched;
-  logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id;
 
   logic [CVA6Cfg.NrIssuePorts-1:0] ld_we_id_ex;
   logic [CVA6Cfg.NrIssuePorts-1:0] st_we_id_ex;
@@ -952,11 +949,8 @@ module cva6
       .rvfi_commit_pointer_o  (rvfi_commit_pointer),
       .rvfi_rs1_o             (rvfi_rs1),
       .rvfi_rs2_o             (rvfi_rs2),
-      .rollback_store_buffer_o(rollback_store_buffer),
       .rollback_ex_o          (rollback_ex),
       .rollback_trans_id_o    (rollback_trans_id),
-      .store_dispatched_i     (store_dispatched),
-      .store_dispatched_id_i  (store_dispatched_id),
       .rollback_active_o      (rollback_en_controller)
   );
 
@@ -1036,9 +1030,6 @@ module cva6
       .store_trans_id_o (store_trans_id_ex_id),
       .store_valid_o    (store_valid_ex_id),
       .store_exception_o(store_exception_ex_id),
-      .store_rollback_i   (rollback_store_buffer),
-      .store_dispatched_o (store_dispatched),
-      .store_dispatched_id_o(store_dispatched_id),
 
       .lsu_commit_i            (lsu_commit_commit_ex),           // from commit
       .lsu_commit_ready_o      (lsu_commit_ready_ex_commit),     // to commit

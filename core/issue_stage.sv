@@ -187,17 +187,10 @@ module issue_stage
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs1_o,
     // Information dedicated to RVFI - RVFI
     output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rvfi_rs2_o,
-    // is rollbacked instr a store - STORE_BUFFER
-    output logic [CVA6Cfg.RollbackWidth-1:0] rollback_store_buffer_o,
     // do we need to rollback the lsu bypass buffer ? - LSU_BYPASS
     output logic [CVA6Cfg.RollbackWidth-1:0] rollback_ex_o,
     // rollback trans id - EX_STAGE
     output logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rollback_trans_id_o,
-    // Has a store been dispatched ? - STORE_UNIT
-    input logic store_dispatched_i,
-    // Store dispatched trans_id - STORE_UNIT
-    input logic [CVA6Cfg.TRANS_ID_BITS-1:0] store_dispatched_id_i,
-
     // Is rollback active
     output logic                                              rollback_active_o
 );
@@ -943,11 +936,8 @@ module issue_stage
       .rollback_old_phys_o     (rollback_old_phys_i),
       .rollback_op_o           (rollback_op_i),
       .rollback_we_o           (rollback_we_i),
-      .rollback_store_buffer_o,
       .rollback_ex_o,
       .rollback_trans_id_o,
-      .store_dispatched_i,
-      .store_dispatched_id_i,
       .rollback_arch_rd_o      (rollback_arch_rd_i),
       .wb_op_o,
       .wb_valid_o              (wb_valid_o),
