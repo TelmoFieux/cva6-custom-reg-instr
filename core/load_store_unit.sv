@@ -229,6 +229,7 @@ module load_store_unit
   logic                                     pmp_translation_valid;
   logic                                     dtlb_hit;
   logic         [         CVA6Cfg.PPNW-1:0] dtlb_ppn;
+  logic                                     translation_type;
 
   logic                                     ld_valid, ld_lsq_result_valid;
   logic         [CVA6Cfg.TRANS_ID_BITS-1:0] ld_trans_id;
@@ -520,30 +521,18 @@ module load_store_unit
       .d_o({store_valid_o, store_trans_id_o, store_result_o, store_exception_o})
   );
 
-  // determine whether this is a load or store
-  always_comb begin : which_op
+  always_comb begin : translation_data
 
-    translation_req   = 1'b0;
-    mmu_vaddr         = {CVA6Cfg.VLEN{1'b0}};
-    mmu_tinst         = {32{1'b0}};
-    mmu_hs_ld_st_inst = 1'b0;
-    mmu_hlvx_inst     = 1'b0;
-
-    // check the operation to activate the right functional unit accordingly
-    unique case (lsu_ctrl.fu)
-      // all loads go here
-      LOAD, STORE: begin
-        translation_req = lsq_translation_req;
-        mmu_vaddr       = lsq_vaddr;
-        if (CVA6Cfg.RVH) begin
-          mmu_tinst         = lsq_tinst;
-          mmu_hs_ld_st_inst = lsq_hs_ld_st_inst;
-          mmu_hlvx_inst     = lsq_hlvx_inst;
-        end
-      end
-      // not relevant for the LSU
-      default: ;
-    endcase
+    translation_req = lsq_translation_req;
+    mmu_vaddr       = lsq_vaddr;
+    mmu_tinst         = '0;
+    mmu_hs_ld_st_inst = '0;
+    mmu_hlvx_inst     = '0;
+    if (CVA6Cfg.RVH) begin
+      mmu_tinst         = lsq_tinst;
+      mmu_hs_ld_st_inst = lsq_hs_ld_st_inst;
+      mmu_hlvx_inst     = lsq_hlvx_inst;
+    end
   end
 
   // ------------------------
@@ -723,6 +712,7 @@ module load_store_unit
     .hs_ld_st_inst_o       (lsq_hs_ld_st_inst),
     .hlvx_inst_o           (lsq_hlvx_inst),
     .translation_req_o     (lsq_translation_req),
+    .translation_type_o    (translation_type),
     .paddr_i               (mmu_paddr),
     .ex_i                  (mmu_exception),
     .dtlb_hit_i            (dtlb_hit),
@@ -767,7 +757,7 @@ module load_store_unit
   );
 
   assign rvfi_lsu_ctrl_o = lsu_ctrl;
-  assign st_translation_req = (lsu_ctrl.fu == STORE);
+  assign st_translation_req = translation_type;
 
   // pragma translate off
   assert property (

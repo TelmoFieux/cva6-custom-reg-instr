@@ -94,6 +94,9 @@ if { $::env(PS7_DDR) == 1 } {
 }
 
 set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING off [get_runs synth_1]
+# set_property "steps.synth_design.args.directive" "AlternateRoutability" [get_runs synth_1]
+# set_property "steps.synth_design.args.directive" "PerformanceOptimized" [get_runs synth_1]
+# set_property "steps.synth_design.args.directive" "AreaOptimized_high" [get_runs synth_1]
 # set_property STEPS.SYNTH_DESIGN.ARGS.NO_LC true [get_runs synth_1]
 
 launch_runs synth_1
@@ -126,9 +129,9 @@ set_property "steps.post_route_phys_opt_design.args.directive" "Explore" [get_ru
 
 set_property "steps.phys_opt_design.is_enabled" "1" [get_runs impl_1]
 # set_property "steps.phys_opt_design.args.directive" "Explore" [get_runs impl_1]
-# set_property "steps.phys_opt_design.args.directive" "AggressiveFanoutOpt" [get_runs impl_1]
+set_property "steps.phys_opt_design.args.directive" "AggressiveFanoutOpt" [get_runs impl_1]
 set_property "steps.phys_opt_design.args.directive" "Explore" [get_runs impl_1]
-# set_property "steps.phys_opt_design.args.directive" "AlternateFlowWithRetiming" [get_runs impl_1]
+set_property "steps.phys_opt_design.args.directive" "AlternateFlowWithRetiming" [get_runs impl_1]
 
 ##create_clock -period $::env(CLK_PERIOD_NS) -name clk_i   [get_ports clk_i]
 

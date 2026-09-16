@@ -72,6 +72,8 @@ module load_store_queue
     output logic                                                      hlvx_inst_o,
     // valid request - MMU
     output logic                                                      translation_req_o,
+    // is it a load or a store - MMU
+    output logic                                                      translation_type_o,
     // Physical address - MMU
     input logic [CVA6Cfg.PLEN-1:0]                                    paddr_i,
     // Exception raised before store - MMU
@@ -1095,6 +1097,8 @@ module load_store_queue
       .winner_valid_o (st_translation_pointer_valid)
   );
 
+
+  assign translation_type_o = CVA6Cfg.MmuPresent ? translation_pointer_type_q : comb_translation_pointer_type;
 
   // Virtual adress translation data
   assign hs_ld_st_inst_o = CVA6Cfg.RVH ?

@@ -211,7 +211,7 @@ module scoreboard
     for (int unsigned i = 0; i < CVA6Cfg.NrCommitPorts; i++) begin
       commit_instr_o[i] = mem_q[commit_pointer_q[i]].sbe;
       commit_instr_o[i].trans_id = commit_pointer_q[i];
-      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled; //|| (bmiss && (commit_pointer_q[i] == after_flu_wb));
+      commit_drop_o[i] = mem_q[commit_pointer_q[i]].cancelled;
       if (state_q == WALKBACK && commit_pointer_q[i] == bmiss_trans_id_q) begin
         commit_instr_o[i].valid = 1'b0;
       end
@@ -447,10 +447,16 @@ end
 
     for (int unsigned i = 0 ; i < CVA6Cfg.RollbackWidth ; i++) begin
       automatic logic same_load_wb;
+      automatic logic [CVA6Cfg.TRANS_ID_BITS-1:0] tid;
+      tid = rollback_payload_q.rollback_trans_id[i];
 
-      same_load_wb = wt_valid_i[LOAD_WB] && trans_id_i[LOAD_WB] == rollback_payload_q.rollback_trans_id[i] &&
-        mem_q[rollback_payload_q.rollback_trans_id[i]].issued && rollback_payload_q.rollback_id[i] == global_id_i[LOAD_WB];
+      same_load_wb = wt_valid_i[LOAD_WB] && trans_id_i[LOAD_WB] == tid &&
+                    mem_q[tid].issued && rollback_payload_q.rollback_id[i] == global_id_i[LOAD_WB];
 
+      rollbacked_ld_o[i] = rollback_payload_q.rollbacked_ld[i]
+                          && !mem_q[tid].sbe.valid
+                          && !mem_q[tid].sbe.ex.valid
+                          && !same_load_wb;
       rollbacked_ld_o[i] = rollback_payload_q.rollbacked_ld[i] && !same_load_wb;
       rollback_rd_o[i] = rollback_payload_q.rollback_rd[i];
       rollback_id_o[i] = rollback_payload_q.rollback_id[i];
@@ -476,6 +482,12 @@ end
       state_n            = NORMAL;
       rollback_pointer_n = '0;
       bmiss_trans_id_n   = '0;
+      rollback_active_d  = 1'b0;
+      rollback_payload_n.rollback_we     = '0;
+      rollback_payload_n.rollback_ex     = '0;
+      rollback_payload_n.rollbacked_ld   = '0;
+      rollback_payload_n.rollback_active = 1'b0;
+      rollback_payload_n.next_state      = NORMAL;
     end else begin
       case (state_q)
         NORMAL : begin
