@@ -457,7 +457,6 @@ end
                           && !mem_q[tid].sbe.valid
                           && !mem_q[tid].sbe.ex.valid
                           && !same_load_wb;
-      rollbacked_ld_o[i] = rollback_payload_q.rollbacked_ld[i] && !same_load_wb;
       rollback_rd_o[i] = rollback_payload_q.rollback_rd[i];
       rollback_id_o[i] = rollback_payload_q.rollback_id[i];
       rollback_we_o[i] = rollback_payload_q.rollback_we[i];

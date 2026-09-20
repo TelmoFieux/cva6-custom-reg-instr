@@ -148,6 +148,7 @@ module commit_stage
     csr_we_o = 1'b0;
     csr_rdata_o = {CVA6Cfg.XLEN{1'b0}};
     csr_waddr_o = '0;
+    csr_trans_id_o = '0;
 
     amo_valid_commit_o = 1'b0;
 
