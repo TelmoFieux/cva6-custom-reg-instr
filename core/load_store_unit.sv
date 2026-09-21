@@ -252,6 +252,7 @@ module load_store_unit
 
   logic [CVA6Cfg.VLEN-1:0]                  no_mmu_vaddr_q;
   logic                                     no_mmu_is_store_q;
+  logic                                     ldbuf_full;
 
 
   logic [1:0] sum, mxr;

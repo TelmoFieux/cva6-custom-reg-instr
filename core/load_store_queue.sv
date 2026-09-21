@@ -267,6 +267,7 @@ module load_store_queue
   logic [LSQ_DEPTH-1:0]                   ld_paddr_valid, st_paddr_valid;
   logic [LSQ_DEPTH-1:0][CVA6Cfg.PLEN-1:0] comb_ld_paddr, comb_st_paddr;
   logic [LSQ_DEPTH-1:0]                   comb_ld_paddr_valid, comb_st_paddr_valid;
+  logic [LSQ_DEPTH-1:0]                   comb_ld_ex_valid, comb_st_ex_valid;
 
   // readyness/forwarding signals
   logic [LSQ_DEPTH-1:0][CVA6Cfg.XLEN-1:0] fwd_data;
@@ -312,8 +313,11 @@ module load_store_queue
   logic      [CVA6Cfg.NrIssuePorts-1:0][    CVA6Cfg.XLEN-1:0] st_data;
 
   logic [LSQ_DEPTH-1:0] wb_valid;
-  logic [LSQ_DEPTH-1:0][CVA6Cfg.XLEN-1:0] wb_data;
-  exception_t [LSQ_DEPTH-1:0] wb_ex;
+  logic [LSQ_DEPTH-1:0] ld_oldest_ready;
+
+  for (genvar i = 0; i < LSQ_DEPTH; i++) begin
+    assign ld_oldest_ready[i] = ld_unit_ready[i] && !(|(age_matrix_q[i][LSQ_DEPTH-1:0] & ld_unit_ready));
+  end
 
   logic [$clog2(LSQ_DEPTH)-1:0] ld_ready_pointer;
   logic ld_ready_pointer_valid;
@@ -323,7 +327,7 @@ module load_store_queue
       .WIDTH(LSQ_DEPTH),
       .MODE(1'b0))
   i_ld_ready_lzc (
-      .in_i   (ld_unit_ready),
+      .in_i   (ld_oldest_ready),
       .cnt_o  (ld_ready_pointer),
       .empty_o(ld_ready_empty)
   );
@@ -707,9 +711,6 @@ module load_store_queue
   end
 
 
-
-
-
   // ---------------
   // LSQ Queue updates
   // ---------------
@@ -946,7 +947,7 @@ module load_store_queue
     ld_unit_ready = '0;
 
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
-      if(st_paddr_valid[i] && data_valid[i] && st_queue_q.reserved[i]) begin
+      if(st_paddr_valid[i] && data_valid[i] && st_queue_q.reserved[i] & !comb_st_ex_valid[i]) begin
         st_queue_n.ready[i] = 1'b1;
       end
 
@@ -956,7 +957,7 @@ module load_store_queue
       // dcache write buffer has no ni store or not all previous committed store have been sent to
       // the cache
       // - we match with an older store adress
-      if(ld_paddr_valid[i] && ld_queue_q.reserved[i] && !ld_queue_q.result_valid[i] && !ld_queue_q.ex[i].valid && !ld_queue_q.issued[i]) begin
+      if(ld_paddr_valid[i] && ld_queue_q.reserved[i] && !ld_queue_q.result_valid[i] && !comb_ld_ex_valid[i] && !ld_queue_q.issued[i]) begin
         ld_queue_n.ready[i] = 1'b1;
         ld_unit_ready[i] = 1'b1;
         if (ld_queue_q.paddr_ni[i]) begin
@@ -992,7 +993,7 @@ module load_store_queue
     // ---------------
 
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
-      if(ld_paddr_valid[i] & ld_queue_q.reserved[i] & !ld_queue_q.paddr_ni[i]) begin
+      if(ld_paddr_valid[i] & ld_queue_q.reserved[i] & !ld_queue_q.paddr_ni[i] & !comb_ld_ex_valid[i]) begin
         // only forward if all data is available
         if (st_older_all_valid[i]) begin
           if (!full_no_match[i]) begin
@@ -1417,7 +1418,7 @@ module load_store_queue
     st_paddr_valid = st_queue_q.paddr_valid;
     st_paddr = st_queue_q.paddr;
 
-    if (translation_data_valid_q && !ex_i.valid) begin
+    if (translation_data_valid_q) begin
       if (previous_translation_pointer_type_q == 1'b0) begin
         comb_ld_paddr_valid[previous_translation_pointer_q] = 1'b1;
         comb_ld_paddr[previous_translation_pointer_q] = paddr_i;
@@ -1431,26 +1432,17 @@ module load_store_queue
       end
     end
 
-    // for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
-    //   // ld_paddr_valid[i] = ld_queue_q.paddr_valid[i];
-    //   // ld_paddr[i] = ld_queue_q.paddr[i];
-    //   comb_ld_paddr_valid[i] = ld_queue_q.paddr_valid[i] ||
-    //     (previous_translation_pointer_type_q == 1'b0 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
-    //   comb_ld_paddr[i] = ld_queue_q.paddr_valid[i] ? ld_queue_q.paddr[i] : paddr_i;
-    //
-    //   ld_paddr_valid[i] = ld_queue_q.paddr_valid[i] ||
-    //     (previous_translation_pointer_type_q == 1'b0 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
-    //   ld_paddr[i] = ld_queue_q.paddr_valid[i] ? ld_queue_q.paddr[i] : paddr_i;
-    //   // st_paddr_valid[i] = st_queue_q.paddr_valid[i];
-    //   // st_paddr[i] = st_queue_q.paddr[i];
-    //   comb_st_paddr_valid[i] = st_queue_q.paddr_valid[i] ||
-    //     (previous_translation_pointer_type_q == 1'b1 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
-    //   comb_st_paddr[i] = st_queue_q.paddr_valid[i] ? st_queue_q.paddr[i] : paddr_i;
-    //
-    //   st_paddr_valid[i] = st_queue_q.paddr_valid[i] ||
-    //     (previous_translation_pointer_type_q == 1'b1 && translation_data_valid_q && previous_translation_pointer_q == i && !ex_i.valid);
-    //   st_paddr[i] = st_queue_q.paddr_valid[i] ? st_queue_q.paddr[i] : paddr_i;
-    // end
+    for (int unsigned i = 0; i < LSQ_DEPTH; i++)
+      comb_ld_ex_valid[i] = ld_queue_q.ex[i].valid;
+    comb_st_ex_valid = st_queue_q.ex_valid;
+
+    if (translation_data_valid_q && ex_i.valid) begin
+      if (previous_translation_pointer_type_q == 1'b0) begin
+        comb_ld_ex_valid[previous_translation_pointer_q] = 1'b1;
+      end else begin
+        comb_st_ex_valid[previous_translation_pointer_q] = 1'b1;
+      end
+    end
 
   end
 
@@ -1560,7 +1552,7 @@ module load_store_queue
 
     for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
       for (int unsigned j = 0; j<LSQ_DEPTH; j ++) begin
-        if (age_matrix_q[i][j+LSQ_DEPTH] && st_queue_q.reserved[j]) begin
+        if (age_matrix_q[i][j+LSQ_DEPTH] && st_queue_q.reserved[j] & !st_queue_q.ex_valid[j]) begin
           st_older[i][j] = 1'b1;
           if (!st_paddr_valid[j]) begin
             st_older_paddr_valid[i] = 1'b0;
@@ -1581,60 +1573,14 @@ module load_store_queue
 
   assign ld_valid_int = ld_wb_pointer_valid;
   //assign load write back info
-  assign ld_result_o = wb_data[ld_wb_pointer];
-  assign ld_ex_o = wb_ex[ld_wb_pointer];
-  assign ld_valid_o = ld_valid_int && !flush_i;
+  assign ld_result_o = ld_queue_q.result[ld_wb_pointer];
+  assign ld_ex_o = ld_queue_q.ex[ld_wb_pointer];
+  assign ld_valid_o = ld_valid_int;
   assign ld_global_id_o = ld_queue_q.instr[ld_wb_pointer].global_id;
   assign ld_trans_id_o = ld_queue_q.instr[ld_wb_pointer].trans_id;
 
-  always_comb begin : ld_write_back
-
-    wb_ex = '0;
-    wb_data = '0;
-    wb_ex= '0;
-
-    //determine wich load is ready to write back
-    for (int unsigned i = 0; i<LSQ_DEPTH; i ++) begin
-      // data or ex from queue
-      if ((ld_queue_q.result_valid[i] || ld_queue_q.ex[i].valid) & ld_queue_q.reserved[i]) begin
-        wb_valid[i] = 1'b1;
-        wb_data[i] = ld_queue_q.result[i];
-        wb_ex[i] = ld_queue_q.ex[i];
-      // end else if (ld_result_valid_i & i == ld_unit_idx_i & ld_queue_q.reserved[i]) begin
-      // // data from load unit this cycle
-      //   wb_valid[i] = 1'b1;
-      //   wb_data[i] = ld_result_i;
-      //   wb_ex[i] = ld_queue_q.ex[i];
-      end else if (translation_data_valid_q & previous_translation_pointer_q == i & ex_i.valid &
-        previous_translation_pointer_type_q == 1'b0 & ld_queue_q.reserved[i]) begin
-      // ex data from this cycle
-        wb_valid[i] = 1'b1;
-        wb_data[i] = '0; // does not matter
-        wb_ex[i] = ex_i;
-      end else if (ld_is_forwarded[i]) begin
-      // data from store forwarding this cycle
-        wb_valid[i] = 1'b1;
-        wb_data[i] = ld_extend(ld_queue_q.instr[i].operation, fwd_data[full_match_winner_idx[i]]);
-        wb_ex[i] = ld_queue_q.ex[i];
-      end else begin
-      // no write back available
-        wb_valid[i] = 1'b0;
-        wb_data[i] = '0;
-        wb_ex[i] = '0;
-      end
-    end
-
-    // squash entry on rollback
-    for (int unsigned i = 0; i < LSQ_DEPTH; i++) begin
-      for (int unsigned j = 0 ; j<CVA6Cfg.RollbackWidth ; j++) begin
-        if (ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j] && rollback_i[j]) begin
-          wb_data[i] = '0;
-          wb_ex[i] = '0;
-          wb_valid[i] = '0;
-        end
-      end
-    end
-
+  for (genvar i = 0 ; i<LSQ_DEPTH ; i++ ) begin
+    assign wb_valid[i] = (ld_queue_q.result_valid[i] || ld_queue_q.ex[i].valid) & ld_queue_q.reserved[i];
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -1902,6 +1848,25 @@ module load_store_queue
     else $error("forwarding sans extension : ld %0d op=%0d data=%h", i,
                 ld_queue_q.instr[i].operation, fwd_data[full_match_winner_idx[i]]);
   end
+
+  // pragma translate_on
+
+  // pragma translate_off
+  int unsigned c_ld_to_cache, c_ld_squashed_after_issue, c_ld_age_inversion;
+  always_ff @(posedge clk_i) if (rst_ni) begin
+    if (ld_unit_valid_o && !ldbuf_full_i) c_ld_to_cache <= c_ld_to_cache + 1;
+    // loads déjà envoyés au cache puis rollbackés : trafic du mauvais chemin
+    for (int i = 0; i < LSQ_DEPTH; i++)
+      for (int j = 0; j < CVA6Cfg.RollbackWidth; j++)
+        if (rollback_i[j] && ld_queue_q.reserved[i] && ld_queue_q.issued[i] &&
+            ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j])
+          c_ld_squashed_after_issue <= c_ld_squashed_after_issue + 1;
+    // un load plus ancien était prêt mais un plus jeune a été choisi
+    if (ld_unit_valid_o && |(age_matrix_q[ld_selected_pointer][LSQ_DEPTH-1:0] & ld_unit_ready))
+      c_ld_age_inversion <= c_ld_age_inversion + 1;
+  end
+  final $display("loads->cache=%0d  mauvais chemin=%0d  inversions d'age=%0d",
+                c_ld_to_cache, c_ld_squashed_after_issue, c_ld_age_inversion);
   // pragma translate_on
 
 endmodule

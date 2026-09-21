@@ -1719,7 +1719,7 @@ module cva6
       .issue_ack(issue_entry_valid_id_issue[0] & issue_instr_issue_id[0]),
       .issue_sbe(issue_entry_id_issue[0]),
       .waddr(),
-      .wdata(wdata_commit_id),
+      .wdata(),
       .we_gpr(we_gpr_commit_id),
       .we_fpr(we_fpr_commit_id),
       .commit_instr(commit_instr_id_commit),
@@ -1836,7 +1836,7 @@ module cva6
       .commit_ack_i(commit_ack),
       .mem_paddr_i (rvfi_mem_paddr),
       .debug_mode_i(debug_mode),
-      .wdata_i     (wdata_commit_id),
+      .wdata_i     (),
 
       .csr_i(rvfi_csr),
       .irq_i(irq_i),

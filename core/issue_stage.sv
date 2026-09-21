@@ -93,8 +93,6 @@ module issue_stage
     input logic [CVA6Cfg.NrIssuePorts-1:0] lsq_full_i,
     // Number of entry freed in the store queue - LOAD_STORE_QUEUE
     input logic [$clog2(CVA6Cfg.NrLSQEntries + 1)-1:0] st_return_token_i,
-    // Load store unit FU is valid - EX_STAGE
-    output logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_o,
     // Mult FU is valid - EX_STAGE
     output logic [CVA6Cfg.NrIssuePorts-1:0] mult_valid_o,
     // FPU FU is ready - EX_STAGE
@@ -883,6 +881,7 @@ module issue_stage
   // 5. Manage instructions in a scoreboard
   // ---------------------------------------------------------
 
+  logic [CVA6Cfg.NrIssuePorts-1:0] lsu_valid_o;
 
   scoreboard #(
       .CVA6Cfg   (CVA6Cfg),
@@ -1038,6 +1037,13 @@ module issue_stage
         ld_token_valid[i] && !lsq_bypass_full[i]
     );
   end
+
+  int unsigned cnt_ld_token_stall;
+  always_ff @(posedge clk_i) if (rst_ni)
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++)
+      if (decoded_instr_valid_i[i] && decoded_instr_i[i].fu == LOAD && !ld_token_valid[i])
+        cnt_ld_token_stall <= cnt_ld_token_stall + 1;
+  final $display("cycles bloqués par ld_token : %0d", cnt_ld_token_stall);
 
   //pragma translate_on
 
