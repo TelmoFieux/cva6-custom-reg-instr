@@ -52,7 +52,9 @@ module lsq_bypass
     input  fu_op [CVA6Cfg.RollbackWidth-1:0]                             rollback_op_i, // op of the instr to rollback
     input  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]rollback_id_i, // id of the entry to rollback
 
-    output scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]                 dispatch_instr_o,
+    output fu_t [CVA6Cfg.NrIssuePorts-1:0]                               dispatch_instr_fu_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]   dispatch_instr_trans_id_o,
+    output logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] dispatch_instr_global_id_o,
     output lsq_data_t [CVA6Cfg.NrIssuePorts-1:0]                         dispatch_instr_data_o,
     output logic [CVA6Cfg.NrIssuePorts-1:0]                              dispatch_instr_valid_o,
 
@@ -71,7 +73,17 @@ module lsq_bypass
   logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
 
   typedef struct packed {
-    scoreboard_entry_t [NR_ENTRIES-1:0] instr;
+    logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;
+    logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_id;
+    fu_op op;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rs1;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rs2;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rd;
+    fu_t fu;
+  } lsq_bypass_entry_t;
+
+  typedef struct packed {
+    lsq_bypass_entry_t [NR_ENTRIES-1:0] instr;
     logic [NR_ENTRIES-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] vaddr_trans_id;
     logic [NR_ENTRIES-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id;
   } instr_queue_t;
@@ -125,7 +137,16 @@ module lsq_bypass
     if (!FALLTHROUGH) begin
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
         if (we[i] & free_q[issue_pointer] & decoded_instr_ack_i[i]) begin
-          instr_queue_n.instr[issue_pointer] = decoded_instr_i[i];
+          instr_queue_n.instr[issue_pointer] =
+            {
+            decoded_instr_i[i].trans_id,
+            decoded_instr_i[i].global_rs_id,
+            decoded_instr_i[i].op,
+            decoded_instr_i[i].rs1,
+            decoded_instr_i[i].rs2,
+            decoded_instr_i[i].rd,
+            decoded_instr_i[i].fu
+            };
           instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
           instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
           free_n[issue_pointer] = 1'b0;
@@ -135,7 +156,16 @@ module lsq_bypass
     end else begin
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
         if (we[i] & free_q[issue_pointer] & decoded_instr_ack_i[i]) begin
-            instr_queue_n.instr[issue_pointer] = decoded_instr_i[i];
+            instr_queue_n.instr[issue_pointer] =
+              {
+              decoded_instr_i[i].trans_id,
+              decoded_instr_i[i].global_rs_id,
+              decoded_instr_i[i].op,
+              decoded_instr_i[i].rs1,
+              decoded_instr_i[i].rs2,
+              decoded_instr_i[i].rd,
+              decoded_instr_i[i].fu
+              };
             instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
             instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
             free_n[issue_pointer] = 1'b0;
@@ -153,7 +183,7 @@ module lsq_bypass
     rm_ptr = dispatch_pointer_q;
 
     for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-      if (rm_i[j] && !free_q[rm_ptr] && rm_id_i[j] == instr_queue_q.instr[rm_ptr].global_rs_id) begin
+      if (rm_i[j] && !free_q[rm_ptr] && rm_id_i[j] == instr_queue_q.instr[rm_ptr].global_id) begin
         free_n[rm_ptr] = 1'b1;
         rm_ptr = rm_ptr + 1'b1;
       end
@@ -163,7 +193,7 @@ module lsq_bypass
 
     for (int unsigned i = 0; i<NR_ENTRIES ; i++) begin
       for (int unsigned j = 0; j<CVA6Cfg.RollbackWidth ; j++) begin
-        if(rollback_en_i[j] & rollback_id_i[j] == instr_queue_q.instr[i].global_rs_id & !free_q[i]) begin
+        if(rollback_en_i[j] & rollback_id_i[j] == instr_queue_q.instr[i].global_id & !free_q[i]) begin
           free_n[i] = 1'b1;
           issue_pointer = issue_pointer - 1'b1;
         end
@@ -181,6 +211,13 @@ module lsq_bypass
 
   end
 
+  lsq_bypass_entry_t [CVA6Cfg.NrIssuePorts-1:0] dispatch_instr;
+
+  for (genvar i = 0 ; i<CVA6Cfg.NrIssuePorts ; i++ ) begin
+    assign dispatch_instr_trans_id_o[i] = dispatch_instr[i].trans_id;
+    assign dispatch_instr_global_id_o[i] = dispatch_instr[i].global_id;
+    assign dispatch_instr_fu_o[i] = dispatch_instr[i].fu;
+  end
 
   always_comb begin : dispatch_instr_data
 
@@ -196,7 +233,7 @@ module lsq_bypass
     ptr = dispatch_pointer_q;
 
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        dispatch_instr_o[i] = instr_queue_q.instr[ptr];
+        dispatch_instr[i] = instr_queue_q.instr[ptr];
         dispatch_instr_valid_o[i] = !free_q[ptr];
         dispatch_instr_data_o[i].vaddr_trans_id = instr_queue_q.vaddr_trans_id[ptr];
         dispatch_instr_data_o[i].data_trans_id = instr_queue_q.data_trans_id[ptr];
@@ -210,7 +247,16 @@ module lsq_bypass
         if (!is_queue_dispatch[i]) begin
           for (int unsigned j = 0; j<CVA6Cfg.NrIssuePorts ; j++) begin
             if (we[j] & decoded_instr_ready_i[j] & !is_queue_dispatch[i] & !decoded_used[j]) begin
-              dispatch_instr_o[i] = decoded_instr_i[j];
+              dispatch_instr[i] =
+                {
+                decoded_instr_i[j].trans_id,
+                decoded_instr_i[j].global_rs_id,
+                decoded_instr_i[j].op,
+                decoded_instr_i[j].rs1,
+                decoded_instr_i[j].rs2,
+                decoded_instr_i[j].rd,
+                decoded_instr_i[j].fu
+                };
               dispatch_instr_valid_o[i] = decoded_instr_valid_i[j];
               dispatch_instr_data_o[i].vaddr_trans_id = vaddr_trans_id_i[j];
               dispatch_instr_data_o[i].data_trans_id = data_trans_id_i[j];
@@ -226,16 +272,16 @@ module lsq_bypass
 
     if (!FPR_ENABLED) begin
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
-        dispatch_instr_data_o[i].data_valid = is_result_available_gpr_q[dispatch_instr_o[i].rs2];
-        dispatch_instr_data_o[i].vaddr_valid = is_result_available_gpr_q[dispatch_instr_o[i].rs1];
+        dispatch_instr_data_o[i].data_valid = is_result_available_gpr_q[dispatch_instr[i].rs2];
+        dispatch_instr_data_o[i].vaddr_valid = is_result_available_gpr_q[dispatch_instr[i].rs1];
 
         // check RAW dependencies
         for (int unsigned k = 0; k < i; k++) begin
-          if (dispatch_instr_o[k].rd == dispatch_instr_o[i].rs2 && dispatch_instr_o[k].rd != '0 && dispatch_instr_valid_o[i] && dispatch_instr_valid_o[k]) begin
+          if (dispatch_instr[k].rd == dispatch_instr[i].rs2 && dispatch_instr[k].rd != '0 && dispatch_instr_valid_o[i] && dispatch_instr_valid_o[k]) begin
             dispatch_instr_data_o[i].data_valid = 1'b0;
           end
 
-          if (dispatch_instr_o[k].rd == dispatch_instr_o[i].rs1 && dispatch_instr_o[k].rd != '0 && dispatch_instr_valid_o[i] && dispatch_instr_valid_o[k]) begin
+          if (dispatch_instr[k].rd == dispatch_instr[i].rs1 && dispatch_instr[k].rd != '0 && dispatch_instr_valid_o[i] && dispatch_instr_valid_o[k]) begin
             dispatch_instr_data_o[i].vaddr_valid = 1'b0;
           end
         end
@@ -244,11 +290,11 @@ module lsq_bypass
           if (fallthrough_out[i]) begin
             for (int unsigned k = 0; k < CVA6Cfg.NrIssuePorts; k++) begin
               if (k < fallthrough_src[i] && decoded_instr_ready_i[k]) begin
-                if (decoded_instr_i[k].rd == dispatch_instr_o[i].rs1 && decoded_instr_i[k].rd != '0) begin
+                if (decoded_instr_i[k].rd == dispatch_instr[i].rs1 && decoded_instr_i[k].rd != '0) begin
                   dispatch_instr_data_o[i].vaddr_valid = 1'b0;
                 end
 
-                if (decoded_instr_i[k].rd == dispatch_instr_o[i].rs2 && decoded_instr_i[k].rd != '0) begin
+                if (decoded_instr_i[k].rd == dispatch_instr[i].rs2 && decoded_instr_i[k].rd != '0) begin
                   dispatch_instr_data_o[i].data_valid = 1'b0;
                 end
               end
@@ -259,18 +305,18 @@ module lsq_bypass
       end
     end else begin
       for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
-        dispatch_instr_data_o[i].data_valid = is_rs2_fpr(dispatch_instr_o[i].op) ? is_result_available_fpr_q[dispatch_instr_o[i].rs2] : is_result_available_gpr_q[dispatch_instr_o[i].rs2];
-        dispatch_instr_data_o[i].vaddr_valid = is_rs1_fpr(dispatch_instr_o[i].op) ? is_result_available_fpr_q[dispatch_instr_o[i].rs1] : is_result_available_gpr_q[dispatch_instr_o[i].rs1];
+        dispatch_instr_data_o[i].data_valid = is_rs2_fpr(dispatch_instr[i].op) ? is_result_available_fpr_q[dispatch_instr[i].rs2] : is_result_available_gpr_q[dispatch_instr[i].rs2];
+        dispatch_instr_data_o[i].vaddr_valid = is_rs1_fpr(dispatch_instr[i].op) ? is_result_available_fpr_q[dispatch_instr[i].rs1] : is_result_available_gpr_q[dispatch_instr[i].rs1];
 
         // check RAW dependencies
         for (int unsigned k = 0; k < i; k++) begin
-          if (is_rd_fpr(dispatch_instr_o[k].op) == is_rs2_fpr(dispatch_instr_o[i].op) &&
-            dispatch_instr_o[k].rd == dispatch_instr_o[i].rs2 && dispatch_instr_o[k].rd != '0 && dispatch_instr_valid_o[i]) begin
+          if (is_rd_fpr(dispatch_instr[k].op) == is_rs2_fpr(dispatch_instr[i].op) &&
+            dispatch_instr[k].rd == dispatch_instr[i].rs2 && dispatch_instr[k].rd != '0 && dispatch_instr_valid_o[i]) begin
             dispatch_instr_data_o[i].data_valid = 1'b0;
           end
 
-          if (is_rd_fpr(dispatch_instr_o[k].op) == is_rs1_fpr(dispatch_instr_o[i].op) &&
-            dispatch_instr_o[k].rd == dispatch_instr_o[i].rs1 && dispatch_instr_o[k].rd != '0 && dispatch_instr_valid_o[i]) begin
+          if (is_rd_fpr(dispatch_instr[k].op) == is_rs1_fpr(dispatch_instr[i].op) &&
+            dispatch_instr[k].rd == dispatch_instr[i].rs1 && dispatch_instr[k].rd != '0 && dispatch_instr_valid_o[i]) begin
             dispatch_instr_data_o[i].vaddr_valid = 1'b0;
           end
         end
@@ -379,66 +425,66 @@ module lsq_bypass
 
   //pragma translate_off
 
-  logic [CVA6Cfg.NrIssuePorts-1:0] dbg_accept_q;
-  logic [CVA6Cfg.NrIssuePorts-1:0] dbg_fired_q;
-
-  logic [CVA6Cfg.NrIssuePorts-1:0]
-        [CVA6Cfg.GlobalRsIdWidth-1:0] dbg_gid_q;
-
-  always_ff @(posedge clk_i) begin
-
-      // Vérification des instructions du cycle précédent
-      for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-          if (dbg_accept_q[j]) begin
-
-              int count;
-              count = 0;
-
-              for (int e = 0; e < NR_ENTRIES; e++) begin
-                  if (
-                      !free_q[e] &&
-                      instr_queue_q.instr[e].global_rs_id == dbg_gid_q[j]
-                  )
-                      count++;
-              end
-
-              if (dbg_fired_q[j]) begin
-                  assert(count == 0)
-                  else $fatal(
-                      1,
-                      "FALLTHROUGH duplicated gid=%0d count=%0d",
-                      dbg_gid_q[j], count
-                  );
-              end else begin
-                  assert(count == 1)
-                  else $fatal(
-                      1,
-                      "BYPASS lost/duplicated gid=%0d count=%0d",
-                      dbg_gid_q[j], count
-                  );
-              end
-          end
-      end
-
-      // Capture cycle courant
-      for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-
-          dbg_accept_q[j] <=
-              we[j] && decoded_instr_ack_i[j];
-
-          dbg_gid_q[j] <= decoded_instr_i[j].global_rs_id;
-
-          dbg_fired_q[j] <= 1'b0;
-
-          for (int p = 0; p < CVA6Cfg.NrIssuePorts; p++) begin
-              if (
-                  rm_i[p] &&
-                  rm_id_i[p] == decoded_instr_i[j].global_rs_id
-              )
-                  dbg_fired_q[j] <= 1'b1;
-          end
-      end
-  end
+  // logic [CVA6Cfg.NrIssuePorts-1:0] dbg_accept_q;
+  // logic [CVA6Cfg.NrIssuePorts-1:0] dbg_fired_q;
+  //
+  // logic [CVA6Cfg.NrIssuePorts-1:0]
+  //       [CVA6Cfg.GlobalRsIdWidth-1:0] dbg_gid_q;
+  //
+  // always_ff @(posedge clk_i) begin
+  //
+  //     // Vérification des instructions du cycle précédent
+  //     for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+  //         if (dbg_accept_q[j]) begin
+  //
+  //             int count;
+  //             count = 0;
+  //
+  //             for (int e = 0; e < NR_ENTRIES; e++) begin
+  //                 if (
+  //                     !free_q[e] &&
+  //                     instr_queue_q.instr[e].global_rs_id == dbg_gid_q[j]
+  //                 )
+  //                     count++;
+  //             end
+  //
+  //             if (dbg_fired_q[j]) begin
+  //                 assert(count == 0)
+  //                 else $fatal(
+  //                     1,
+  //                     "FALLTHROUGH duplicated gid=%0d count=%0d",
+  //                     dbg_gid_q[j], count
+  //                 );
+  //             end else begin
+  //                 assert(count == 1)
+  //                 else $fatal(
+  //                     1,
+  //                     "BYPASS lost/duplicated gid=%0d count=%0d",
+  //                     dbg_gid_q[j], count
+  //                 );
+  //             end
+  //         end
+  //     end
+  //
+  //     // Capture cycle courant
+  //     for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+  //
+  //         dbg_accept_q[j] <=
+  //             we[j] && decoded_instr_ack_i[j];
+  //
+  //         dbg_gid_q[j] <= decoded_instr_i[j].global_rs_id;
+  //
+  //         dbg_fired_q[j] <= 1'b0;
+  //
+  //         for (int p = 0; p < CVA6Cfg.NrIssuePorts; p++) begin
+  //             if (
+  //                 rm_i[p] &&
+  //                 rm_id_i[p] == decoded_instr_i[j].global_rs_id
+  //             )
+  //                 dbg_fired_q[j] <= 1'b1;
+  //         end
+  //     end
+  // end
 
   // pragma translate_on
 

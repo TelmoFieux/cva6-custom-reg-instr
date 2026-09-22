@@ -53,6 +53,8 @@ module scoreboard
     // we can always put this instruction to the top unless we signal with asserted full_o
     // Handshake's data with decode stage - ID_STAGE
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       decoded_instr_i,
+    // trans_id of instruction elected by the tournament tree - ISSUE_STAGE
+    input logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] issue_instr_trans_id_i,
     // instruction value - ID_STAGE
     input  logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_i,
     // Handshake's valid with decode stage - ID_STAGE
@@ -63,6 +65,8 @@ module scoreboard
     output logic              [CVA6Cfg.NrIssuePorts-1:0][31:0] orig_instr_o,
     // Is there an instruction to issue - ISSUE_READ_OPERANDS
     output logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_valid_o,
+    // instr sent to IRO - IRO
+    output scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]       issue_instr_sb_o,
     // Issue stage acknowledge - ISSUE_READ_OPERANDS
     input  logic              [CVA6Cfg.NrIssuePorts-1:0]       issue_ack_i,
 
@@ -193,6 +197,18 @@ module scoreboard
 
   for (genvar i = 0; i < CVA6Cfg.NR_SB_ENTRIES; i++) begin
     assign issued_instrs_even_odd[i%2][i/2] = mem_q[i].issued;
+  end
+
+  always_comb begin : get_scoreboard_entry
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      issue_instr_sb_o[i] = mem_q[issue_instr_trans_id_i[i]].sbe;
+      if (!mem_q[issue_instr_trans_id_i[i]].issued) begin   // fallthrough only
+        for (int unsigned j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+          if (issue_pointer[j] == issue_instr_trans_id_i[i])
+            issue_instr_sb_o[i] = decoded_instr_i[j];
+        end
+      end
+    end
   end
 
   // the issue queue is full don't issue any new instructions
@@ -635,5 +651,15 @@ end
         end
     end
   end
-  //pragma translate_on
+
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+      tree_valid[i] |-> issue_instr_sb[i].global_rs_id == tournament_seq_num[winner[i]])
+    else $error("SB et arbre incohérents, port %0d", i);
+  end
+  assert property (@(posedge clk_i) disable iff (!rst_ni) ld_token_q <= CVA6Cfg.NrLSQEntries)
+    else $error("ld_token > NrLSQEntries");
+  assert property (@(posedge clk_i) disable iff (!rst_ni) st_token_q <= CVA6Cfg.NrLSQEntries)
+    else $error("st_token > NrLSQEntries");
+  // pragma translate_on
 endmodule

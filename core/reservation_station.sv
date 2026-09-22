@@ -57,14 +57,28 @@ module reservation_station
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_ack_i,
     input  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]  commit_pointer_i,
 
-    output scoreboard_entry_t                                            decoded_instr_o, //instructions found ready
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                                     decoded_instr_trans_id_o,
+    output logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           decoded_instr_global_id_o,
     output logic                                                         decoded_instr_valid_o //is instruction valid
 );
 
   localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
   typedef struct packed {
-    scoreboard_entry_t [NR_RS_ENTRIES-1:0] rs_table;
+    logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id;
+    logic [CVA6Cfg.TRANS_ID_BITS-1:0] trans_id;
+    fu_t fu;
+    fu_op op;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rs1;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rs2;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rd;
+    logic [CVA6Cfg.XLEN-1:0] result;
+    logic use_imm;
+    logic ex_valid; // an exception has occurred during frontend
+  } rs_entry_t;
+
+  typedef struct packed {
+    rs_entry_t [NR_RS_ENTRIES-1:0] rs_table;
     logic [NR_RS_ENTRIES-1:0] free_entries;
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
   } reservation_station_t;
@@ -155,7 +169,8 @@ module reservation_station
     assign decoded_instr_valid_o = winner_valid_o;
   end
 
-  assign decoded_instr_o = rs_q.rs_table[winner_o];
+  assign decoded_instr_trans_id_o = rs_q.rs_table[winner_o].trans_id;
+  assign decoded_instr_global_id_o = rs_q.rs_table[winner_o].global_rs_id;
 
   always_comb begin : updating_rs
     logic allocated_by_p0;
@@ -200,7 +215,19 @@ module reservation_station
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (decoded_instr_ack_i[i]) begin
         if (we_i[i] && empty_mask[i] == 1'b0) begin
-          rs_n.rs_table[alloc_idx[i]] = decoded_instr_i[i];
+          rs_n.rs_table[alloc_idx[i]] =
+            {
+            decoded_instr_i[i].global_rs_id,
+            decoded_instr_i[i].trans_id,
+            decoded_instr_i[i].fu,
+            decoded_instr_i[i].op,
+            decoded_instr_i[i].rs1,
+            decoded_instr_i[i].rs2,
+            decoded_instr_i[i].rd,
+            decoded_instr_i[i].result,
+            decoded_instr_i[i].use_imm,
+            decoded_instr_i[i].ex.valid
+            };
         end
 
         //always update dependency based on newly issued instr
@@ -513,7 +540,7 @@ module reservation_station
         if (decoded_instr_i[1].ex.valid || decoded_instr_i[1].fu == NONE)
           rs_n.valid_regs[i] = '1;
       end else begin
-        if (rs_q.rs_table[i].ex.valid || rs_q.rs_table[i].fu == NONE)
+        if (rs_q.rs_table[i].ex_valid || rs_q.rs_table[i].fu == NONE)
           rs_n.valid_regs[i] = '1;
       end
     end
@@ -548,4 +575,24 @@ module reservation_station
       end
     end
   end
+
+  // pragma translate_off
+  longint unsigned c_rs_alloc = 0, c_rs_ft = 0;
+
+  always_ff @(posedge clk_i) begin
+    if (rst_ni) begin
+      for (int unsigned j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+        if (we_i[j] && decoded_instr_valid_i[j] && decoded_instr_ack_i[j] && !empty_mask[j]) begin
+          c_rs_alloc++;
+          // operandes deja prets a l'ecriture ET la RS n'avait rien d'autre a proposer
+          if (rs_n.valid_regs[alloc_idx[j]] == '1 && !decoded_instr_valid_o) c_rs_ft++;
+        end
+      end
+    end
+  end
+
+  final $display("[RS %m] allocations = %0d, fallthrough potentiel = %0d (%0.1f %%)",
+                 c_rs_alloc, c_rs_ft, c_rs_alloc ? 100.0*real'(c_rs_ft)/real'(c_rs_alloc) : 0.0);
+  // pragma translate_on
+
 endmodule

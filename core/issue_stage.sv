@@ -465,12 +465,12 @@ module issue_stage
   fu_op [CVA6Cfg.NrWbPorts-1:0]       wb_op_o;
   logic [CVA6Cfg.NrWbPorts-1:0]       wb_valid_o;
 
-  scoreboard_entry_t [NR_WB-1:0] rs_results;
+  logic [NR_WB-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rs_trans_id;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rs_global_id;
   logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_full;
   logic [NR_WB-1:0] rs_valid;
 
-  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] tree_results;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] tree_results;
   logic [CVA6Cfg.NrIssuePorts-1:0] tree_valid;
 
   //remove signal for the RS
@@ -500,9 +500,10 @@ module issue_stage
     if (is_rs_instanciated) begin : rs_instance
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
 
-      scoreboard_entry_t               decoded_instr_o;
-      logic                            decoded_instr_valid_o;
-      logic [CVA6Cfg.NrIssuePorts-1:0] rs_full_o;
+      logic [CVA6Cfg.TRANS_ID_BITS-1:0]           decoded_instr_trans_id_o;
+      logic [CVA6Cfg.GlobalRsIdWidth-1:0] decoded_instr_global_id_o;
+      logic                               decoded_instr_valid_o;
+      logic [CVA6Cfg.NrIssuePorts-1:0]    rs_full_o;
 
 
 
@@ -584,18 +585,19 @@ module issue_stage
         .decoded_instr_valid_i      (decoded_instr_valid_i),
         .decoded_instr_ack_i        (decoded_instr_ack_o),
         .commit_pointer_i           (rvfi_commit_pointer_o),
-        .decoded_instr_o            (decoded_instr_o),
+        .decoded_instr_trans_id_o   (decoded_instr_trans_id_o),
+        .decoded_instr_global_id_o  (decoded_instr_global_id_o),
         .decoded_instr_valid_o      (decoded_instr_valid_o)
       );
       //TODO: puisque j'ai enlevé fu_ready qui causait des boucle combinatoire, on peut se retrouver
       //à selectionner une op pour une unité occupé non ? Même si en soit je pense que c'est plus
       //trop un problème avec l'ajout de la lsq
-      assign rs_results[i] = decoded_instr_o;
+      assign rs_trans_id[i] = decoded_instr_trans_id_o;
       assign rs_valid[i] = decoded_instr_valid_o;
       assign rs_full[i] = rs_full_o & we_i;
-      assign rs_global_id[i] = decoded_instr_o.global_rs_id;
+      assign rs_global_id[i] = decoded_instr_global_id_o;
     end else begin
-      assign rs_results[i] = '0;
+      assign rs_trans_id[i] = '0;
       assign rs_valid[i] = '0;
       assign rs_full[i] = '0;
       assign rs_global_id[i] = '0;
@@ -627,8 +629,10 @@ module issue_stage
   localparam int TOKEN_W = $clog2(CVA6Cfg.NrLSQEntries + 1);
 
   logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] data_trans_id, vaddr_trans_id;
-  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]               lsq_dispatch_instr;
+  fu_t [CVA6Cfg.NrIssuePorts-1:0]                             lsq_dispatch_instr_fu;
   logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_dispatch_instr_valid;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] lsq_dispatch_instr_trans_id;
+  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] lsq_dispatch_instr_global_id;
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0]                       lsq_dispatch_instr_data;
   logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_tournament_valid;
   logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_token_valid, st_token_valid;
@@ -651,9 +655,9 @@ module issue_stage
 
 
   always_comb begin
-    lsq_tournament_valid[0] = lsq_dispatch_instr_valid[0] && (lsq_dispatch_instr[0].fu == LOAD || st_token_valid[0]);
+    lsq_tournament_valid[0] = lsq_dispatch_instr_valid[0] && ((lsq_dispatch_instr_fu[0] == LOAD) || st_token_valid[0]);
     for (int unsigned i = 1; i< CVA6Cfg.NrIssuePorts; i++ ) begin
-      lsq_tournament_valid[i] = lsq_dispatch_instr_valid[i] & lsq_tournament_valid[i-1] & (lsq_dispatch_instr[i].fu == LOAD || st_token_valid[i]);
+      lsq_tournament_valid[i] = lsq_dispatch_instr_valid[i] & lsq_tournament_valid[i-1] & (lsq_dispatch_instr_fu[i] == LOAD || st_token_valid[i]);
     end
   end
 
@@ -665,7 +669,7 @@ module issue_stage
 
     ld_token = ld_token_q;
 
-    if (wb_valid_o[LOAD_WB]) begin
+    if (wt_valid_i[LOAD_WB]) begin
       ld_token = ld_token + 1'b1;
     end
 
@@ -685,7 +689,7 @@ module issue_stage
         ld_speculative_token = ld_speculative_token - 1'b1;
       end
 
-      if (st_speculative_token != 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr[i].fu == STORE) begin
+      if (st_speculative_token != 0 && lsq_dispatch_instr_valid[i] && lsq_dispatch_instr_fu[i] == STORE) begin
         st_token_valid[i] = 1'b1;
         st_speculative_token = st_speculative_token - 1'b1;
       end
@@ -754,7 +758,9 @@ module issue_stage
     .rollback_op_i              (rollback_op_i),
     .rollback_rd_i              (rollback_rd_i),
     .rollback_id_i              (rollback_id_o),
-    .dispatch_instr_o           (lsq_dispatch_instr),
+    .dispatch_instr_fu_o        (lsq_dispatch_instr_fu),
+    .dispatch_instr_trans_id_o  (lsq_dispatch_instr_trans_id),
+    .dispatch_instr_global_id_o (lsq_dispatch_instr_global_id),
     .dispatch_instr_valid_o     (lsq_dispatch_instr_valid),
     .dispatch_instr_data_o      (lsq_dispatch_instr_data),
     .vaddr_trans_id_i           (vaddr_trans_id),
@@ -774,18 +780,18 @@ module issue_stage
 
   logic              [TOURNAMENT_SIZE-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
   logic              [TOURNAMENT_SIZE-1:0][$clog2(TOURNAMENT_SIZE)-1:0]    tournament_id;
-  scoreboard_entry_t [TOURNAMENT_SIZE-1:0]                                 tournament_candidates;
+  logic              [TOURNAMENT_SIZE-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]      tournament_candidates;
 
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] tree_lsq_data;
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] issue_lsq_data;
 
-  assign tournament_candidates = {lsq_dispatch_instr, rs_results};
+  assign tournament_candidates = {lsq_dispatch_instr_trans_id, rs_trans_id};
 
   for (genvar i = 0 ; i < TOURNAMENT_SIZE ; i++) begin
     if (i < NR_WB) begin
       assign tournament_seq_num[i] = rs_global_id[i];
     end else begin
-      assign tournament_seq_num[i] = lsq_dispatch_instr[i-NR_WB].global_rs_id;
+      assign tournament_seq_num[i] = lsq_dispatch_instr_global_id[i-NR_WB];
     end
     assign tournament_id[i] = i;
   end
@@ -828,25 +834,28 @@ module issue_stage
   //2. CSR instruction forbids issuing 2 instuction at the same time
   // and it must be issued strictly in order
 
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] issue_instr_sb;
+
   always_comb begin : issue_valid
 
     issue_lsq_data = '0;
+    issue_instr_sb_iro = '0;
+    issue_instr_valid_sb_iro = '0;
 
-    if (tree_results[0].fu == CSR || tree_results[1].fu == CSR) begin
-      issue_instr_sb_iro[0] = tree_results[0];
-      issue_instr_sb_iro[1] = '0;
+    if (issue_instr_sb[0].fu == CSR || issue_instr_sb[1].fu == CSR) begin
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = 1'b0;
+      issue_instr_sb_iro = issue_instr_sb;
       issue_lsq_data[0] = tree_lsq_data[0];
-    end else if (tree_results[1].fu == CVXIF) begin
-      issue_instr_sb_iro[0] = tree_results[1];
-      issue_instr_sb_iro[1] = tree_results[0];
+    end else if (issue_instr_sb[1].fu == CVXIF) begin
+      issue_instr_sb_iro[0] = issue_instr_sb[1];
+      issue_instr_sb_iro[1] = issue_instr_sb[0];
       issue_instr_valid_sb_iro[0] = tree_valid[1];
       issue_instr_valid_sb_iro[1] = tree_valid[0];
       issue_lsq_data[0] = tree_lsq_data[1];
       issue_lsq_data[1] = tree_lsq_data[0];
     end else begin
-      issue_instr_sb_iro = tree_results;
+      issue_instr_sb_iro = issue_instr_sb;
       issue_instr_valid_sb_iro = tree_valid;
       issue_lsq_data = tree_lsq_data;
     end
@@ -905,6 +914,7 @@ module issue_stage
       .commit_drop_o,
       .commit_ack_i,
       .decoded_instr_i         (renamed_instr_i),
+      .issue_instr_trans_id_i  (tree_results),
       .data_trans_id_o         (data_trans_id),
       .vaddr_trans_id_o        (vaddr_trans_id),
       .orig_instr_i,
@@ -912,6 +922,7 @@ module issue_stage
       .decoded_instr_ack_i     (decoded_instr_ack_o),
       .orig_instr_o            (orig_instr_sb_iro),
       .issue_instr_valid_o     (issue_instr_ack),
+      .issue_instr_sb_o        (issue_instr_sb),
       .issue_ack_i             (),
       .resolved_branch_i       (resolved_branch_i),
       .trans_id_i              (trans_id_i),
@@ -1046,5 +1057,135 @@ module issue_stage
   final $display("cycles bloqués par ld_token : %0d", cnt_ld_token_stall);
 
   //pragma translate_on
+
+  // pragma translate_off
+  assert property (@(posedge clk_i) disable iff (!rst_ni)
+    wt_valid_i[LOAD_WB] && !flush_i |-> wb_valid_o[LOAD_WB])
+  else $error("WB load rejeté par le scoreboard : le crédit serait faux");
+  // pragma translate_on
+
+  // pragma translate_off
+  // =====================================================================
+  //  Instrumentation performance (simulation uniquement)
+  // =====================================================================
+  longint unsigned c_cycles = 0, c_issued = 0, c_committed = 0;
+  longint unsigned c_iss0 = 0, c_iss1 = 0, c_iss2 = 0;
+  longint unsigned c_mispredict = 0, c_walkback = 0, c_flush = 0;
+  longint unsigned c_st_walkback = 0, c_st_rat = 0, c_st_sb = 0, c_st_rs = 0,
+                   c_st_bypass = 0, c_st_ldtok = 0, c_st_other = 0, c_no_instr = 0;
+  longint unsigned c_st_sttok = 0, c_sb_full = 0;
+  longint unsigned c_dep_stall = 0, c_iro_reject = 0;
+  longint unsigned c_mul_wb = 0, c_mul_consumer = 0;
+
+  logic                            mul_wb_d, mul_wb_q2;
+  logic [CVA6Cfg.RegAddrWidth-1:0] mul_rd_d, mul_rd_q2;
+
+  function automatic logic is_mul_op(fu_op o);
+    return (o == MUL) || (o == MULH) || (o == MULHU) || (o == MULHSU) || (o == MULW);
+  endfunction
+
+  always_comb begin
+    mul_wb_d = 1'b0;
+    mul_rd_d = '0;
+    for (int i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
+      if (wb_valid_o[i] && is_mul_op(wb_op_o[i])) begin
+        mul_wb_d = 1'b1;
+        mul_rd_d = wbaddr_o[i];
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    automatic int n_iss = 0;
+
+    mul_wb_q2 <= mul_wb_d;
+    mul_rd_q2 <= mul_rd_d;
+
+    if (rst_ni) begin
+      c_cycles++;
+
+      // ---- débit
+      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) if (rm_i[i]) n_iss++;
+      c_issued += n_iss;
+      case (n_iss)
+        0: c_iss0++;
+        1: c_iss1++;
+        default: c_iss2++;
+      endcase
+      for (int i = 0; i < CVA6Cfg.NrCommitPorts; i++) if (commit_ack_i[i]) c_committed++;
+      if (sb_full_o) c_sb_full++;
+
+      // ---- coût des mauvaises prédictions
+      if (resolved_branch_i.valid && resolved_branch_i.is_mispredict) c_mispredict++;
+      if (rollback_active) c_walkback++;
+      if (flush_i) c_flush++;
+
+      // ---- pourquoi le décodage ne passe pas (port 0 : il commande la chaîne)
+      if (decoded_instr_valid_i[0] && !decoded_instr_ready[0]) begin
+        if (rollback_active)                               c_st_walkback++;
+        else if (empty_gpr[0] && issue_we_i[0])            c_st_rat++;
+        else if (!issue_instr_ack[0])                      c_st_sb++;
+        else if (final_rs_full[0])                         c_st_rs++;
+        else if (lsq_bypass_we[0] && lsq_bypass_full[0])   c_st_bypass++;
+        else if (lsq_bypass_we[0] && !lsq_token_valid[0])  c_st_ldtok++;
+        else                                               c_st_other++;
+      end else if (!decoded_instr_valid_i[0]) begin
+        c_no_instr++;
+      end
+
+      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++)
+        if (lsq_dispatch_instr_valid[i] && lsq_dispatch_instr_fu[i] == STORE && !st_token_valid[i])
+          c_st_sttok++;
+
+      // ---- pourquoi rien n'est émis
+      if (n_iss == 0 && !flush_i && !rollback_active) begin
+        if (!(|tree_valid)) c_dep_stall++;   // aucun candidat prêt : dépendances vraies
+        else                c_iro_reject++;  // candidat prêt mais l'IRO refuse
+      end
+
+      // ---- potentiel du wakeup spéculatif des MUL
+      if (mul_wb_d) c_mul_wb++;
+      if (mul_wb_q2) begin
+        for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+          if (rm_i[i] && mul_rd_q2 != '0 &&
+              ((issue_instr_sb_iro[i].rs1 == mul_rd_q2) ||
+               (!issue_instr_sb_iro[i].use_imm && issue_instr_sb_iro[i].rs2 == mul_rd_q2)))
+            c_mul_consumer++;
+        end
+      end
+    end
+  end
+
+  final begin
+    $display("=========== instrumentation issue_stage ===========");
+    $display("cycles ................... %0d", c_cycles);
+    $display("instr emises ............. %0d   (IPC issue %0.3f)", c_issued, real'(c_issued)/real'(c_cycles));
+    $display("instr commitees .......... %0d   (IPC commit %0.3f)", c_committed, real'(c_committed)/real'(c_cycles));
+    $display("emission 0/1/2 par cycle . %0d / %0d / %0d", c_iss0, c_iss1, c_iss2);
+    $display("--- mauvaises predictions");
+    $display("mispredictions ........... %0d", c_mispredict);
+    $display("cycles en walkback ....... %0d  (%0.2f %% des cycles, %0.2f cycles/mispredict)",
+             c_walkback, 100.0*real'(c_walkback)/real'(c_cycles),
+             c_mispredict ? real'(c_walkback)/real'(c_mispredict) : 0.0);
+    $display("cycles de flush .......... %0d", c_flush);
+    $display("--- blocages du decodage (port 0)");
+    $display("walkback ................. %0d", c_st_walkback);
+    $display("plus de registre phys .... %0d", c_st_rat);
+    $display("scoreboard plein ......... %0d   (cycles sb_full : %0d)", c_st_sb, c_sb_full);
+    $display("RS pleine ................ %0d", c_st_rs);
+    $display("lsq_bypass plein ......... %0d", c_st_bypass);
+    $display("credit load ............. %0d", c_st_ldtok);
+    $display("autre .................... %0d", c_st_other);
+    $display("front-end a sec .......... %0d", c_no_instr);
+    $display("credit store (dispatch) .. %0d", c_st_sttok);
+    $display("--- cycles sans emission");
+    $display("aucun candidat pret ...... %0d  (%0.2f %%)", c_dep_stall, 100.0*real'(c_dep_stall)/real'(c_cycles));
+    $display("candidat refuse par IRO .. %0d  (%0.2f %%)", c_iro_reject, 100.0*real'(c_iro_reject)/real'(c_cycles));
+    $display("--- potentiel wakeup MUL");
+    $display("write-backs MUL .......... %0d", c_mul_wb);
+    $display("consommateurs a WB+1 ..... %0d  (borne sup. du gain : %0.2f %% des cycles)",
+             c_mul_consumer, 100.0*real'(c_mul_consumer)/real'(c_cycles));
+  end
+  // pragma translate_on
 
 endmodule

@@ -406,6 +406,12 @@ module issue_read_operands
 
     always_comb begin : forwarding_operand_select
 
+      automatic logic rs1_fpr, rs2_fpr, imm_fpr;
+
+      rs1_fpr = is_rs1_fpr(issue_instr_i[i].op);
+      rs2_fpr = is_rs2_fpr(issue_instr_i[i].op);
+      imm_fpr = is_imm_fpr(issue_instr_i[i].op);
+
       lsq_data_n[i] = flush_i ? '0 : lsq_data_i[i];
 
       // default is regfiles (gpr or fpr)
@@ -435,13 +441,13 @@ module issue_read_operands
       // forwarding in case of dependance between two instr in the same cycle
       for (int unsigned k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
 
-        if (((we_gpr_i[k] && !is_rs1_fpr(issue_instr_i[i].op)) || (we_fpr_i[k]) && is_rs1_fpr(issue_instr_i[i].op))
+        if (((we_gpr_i[k] && !rs1_fpr) || (we_fpr_i[k] && rs1_fpr))
           && waddr_i[k] == issue_instr_i[i].rs1 && issue_instr_i[i].rs1 != '0) begin
             fu_data_n[i].operand_a = csr_we_i && k == FLU_WB ? csr_rdata_i : wdata_i[k];
             if (issue_instr_i[i].fu inside {LOAD, STORE}) lsq_data_n[i].vaddr_valid = 1'b1;
         end
 
-        if (((we_gpr_i[k] && !is_rs2_fpr(issue_instr_i[i].op)) || (we_fpr_i[k]) && is_rs2_fpr(issue_instr_i[i].op))
+        if (((we_gpr_i[k] && !rs2_fpr) || (we_fpr_i[k] && rs2_fpr))
           && waddr_i[k] == issue_instr_i[i].rs2 && issue_instr_i[i].rs2 != '0) begin
             fu_data_n[i].operand_b = csr_we_i && k == FLU_WB ? csr_rdata_i : wdata_i[k];
             if (issue_instr_i[i].fu == STORE) lsq_data_n[i].data_valid = 1'b1;
@@ -449,7 +455,7 @@ module issue_read_operands
         end
 
         if (OPERANDS_PER_INSTR == 3 && !issue_instr_i[i].use_imm) begin
-          if (((we_gpr_i[k] && !is_imm_fpr(issue_instr_i[i].op)) || (we_fpr_i[k]) && is_imm_fpr(issue_instr_i[i].op))
+          if (((we_gpr_i[k] && !imm_fpr) || (we_fpr_i[k] && imm_fpr))
             && waddr_i[k] == issue_instr_i[i].result && issue_instr_i[i].result != '0)
               fu_data_n[i].imm = csr_we_i && k == FLU_WB ? csr_rdata_i : wdata_i[k];
         end
