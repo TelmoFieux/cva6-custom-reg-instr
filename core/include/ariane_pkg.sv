@@ -527,7 +527,6 @@ package ariane_pkg;
   typedef enum logic [3:0] {
     FLU,
     FPU_ALU2,
-    LOAD_STORE,
     // F_ACCEL, not allowed yet on superscalar mode
     F_CVXIF
   } fu_phys;
@@ -536,7 +535,6 @@ package ariane_pkg;
   function automatic int unsigned rs_size(input fu_phys phys);
     unique case (phys)
       FLU:  return 4;
-      LOAD_STORE: return 4;
       FPU_ALU2: return 4;
       F_CVXIF: return 4;
       default: begin

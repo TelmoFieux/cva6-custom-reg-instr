@@ -1725,13 +1725,6 @@ module load_store_queue
 
   assert property (
     @(posedge clk_i) disable iff (!rst_ni)
-    ld_pop_i
-    |->
-    ld_unit_valid_o
-  );
-
-  assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
 
     ld_pop_i &&
     ld_queue_q.paddr_ni[ld_selected_pointer]

@@ -31,7 +31,6 @@ module reservation_station
     parameter int unsigned           ADDR_WIDTH    = 5,
     parameter int unsigned           NR_RS_ENTRIES = 4,
     parameter int unsigned           FPR_ENABLED   = 0,
-    parameter int unsigned           LSU_EN        = 0, // does this RS contains LOAD or STORE instr
     parameter int unsigned           CSR_EN        = 0, // does this RS contains CSR instr
     parameter type scoreboard_entry_t = logic
 ) (
@@ -57,9 +56,10 @@ module reservation_station
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_ack_i,
     input  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]  commit_pointer_i,
 
-    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                                     decoded_instr_trans_id_o,
+    output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                             decoded_instr_trans_id_o,
     output logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           decoded_instr_global_id_o,
     output logic                                                         decoded_instr_valid_o //is instruction valid
+
 );
 
   localparam NUM_REG = CVA6Cfg.NrPhysReg;
@@ -83,8 +83,6 @@ module reservation_station
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
   } reservation_station_t;
 
-  //TODO: qu'est ce qui m'empêche de mettre en place un fall through dans le cas ou il n'y a qu'un
-  //seule instruction et qu'elle est valide on peut directement l'envoyer non ?
 
   logic [NUM_REG-1:0] is_result_available_gpr_n, is_result_available_gpr_q;
   //some operations might use gpr and fpr register as operands or destination
@@ -128,15 +126,9 @@ module reservation_station
   logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] speculative_updated_regs;
 
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
-    // lsu instr must be strictly issued in order so we label all of them as valid
-    // to ensure the tournament_tree output de oldest one
-    if (LSU_EN) begin
-      assign tournament_valid[i] = (rs_q.free_entries[i] == 1'b0);
-    end else begin
-      assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ?
-        (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR ? 1'b1 : 1'b0)
-      : 1'b0;
-    end
+    assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ?
+      (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR ? 1'b1 : 1'b0)
+    : 1'b0;
     assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
     assign tournament_id[i] = i;
   end
@@ -155,12 +147,7 @@ module reservation_station
       .winner_valid_o (winner_valid_o)
   );
 
-  if (LSU_EN) begin
-    // now that we have the oldest one we check it's validity
-    assign decoded_instr_valid_o = rs_q.free_entries[winner_o] == 1'b0 ?
-        (rs_q.valid_regs[winner_o] == '1 ? 1'b1 : 1'b0)
-      : 1'b0;
-  end else if (CSR_EN) begin
+  if (CSR_EN) begin
     //only send csr to execution if all other instruction finished execution
     assign decoded_instr_valid_o = rs_q.rs_table[winner_o].fu == CSR ?
         (winner_valid_o && rs_q.valid_regs[winner_o] == '1 && rs_q.rs_table[winner_o].trans_id == commit_pointer_i[0])
@@ -171,6 +158,7 @@ module reservation_station
 
   assign decoded_instr_trans_id_o = rs_q.rs_table[winner_o].trans_id;
   assign decoded_instr_global_id_o = rs_q.rs_table[winner_o].global_rs_id;
+
 
   always_comb begin : updating_rs
     logic allocated_by_p0;
@@ -577,22 +565,16 @@ module reservation_station
   end
 
   // pragma translate_off
-  longint unsigned c_rs_alloc = 0, c_rs_ft = 0;
+  // Événements lus par l'instrumentation de issue_stage
+  logic [CVA6Cfg.NrIssuePorts-1:0] perf_alloc, perf_ft;
 
-  always_ff @(posedge clk_i) begin
-    if (rst_ni) begin
-      for (int unsigned j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
-        if (we_i[j] && decoded_instr_valid_i[j] && decoded_instr_ack_i[j] && !empty_mask[j]) begin
-          c_rs_alloc++;
-          // operandes deja prets a l'ecriture ET la RS n'avait rien d'autre a proposer
-          if (rs_n.valid_regs[alloc_idx[j]] == '1 && !decoded_instr_valid_o) c_rs_ft++;
-        end
-      end
+  always_comb begin
+    for (int unsigned j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+      perf_alloc[j] = we_i[j] && decoded_instr_valid_i[j] && decoded_instr_ack_i[j] && !empty_mask[j];
+      // opérandes prêts à l'écriture ET la RS n'avait rien d'autre à proposer
+      perf_ft[j]    = perf_alloc[j] && (rs_n.valid_regs[alloc_idx[j]] == '1) && !decoded_instr_valid_o;
     end
   end
-
-  final $display("[RS %m] allocations = %0d, fallthrough potentiel = %0d (%0.1f %%)",
-                 c_rs_alloc, c_rs_ft, c_rs_alloc ? 100.0*real'(c_rs_ft)/real'(c_rs_alloc) : 0.0);
   // pragma translate_on
 
 endmodule

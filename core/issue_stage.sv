@@ -418,9 +418,8 @@ module issue_stage
   end
 
   always_comb begin : reg_sel
-    logic [CVA6Cfg.GlobalRsIdWidth-1:0] id_counter, speculative_id_counter;
+    logic [CVA6Cfg.GlobalRsIdWidth-1:0] id_counter;
     id_counter = global_rs_id_q;
-    speculative_id_counter = global_rs_id_q;
 
     if (CVA6Cfg.FpPresent) begin
       renamed_instr_i = decoded_instr_i;
@@ -434,16 +433,11 @@ module issue_stage
     end else begin
       renamed_instr_i = gpr_renamed_instr_i;
     end
-    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        renamed_instr_i[i].global_rs_id = speculative_id_counter;
-        renamed_instr_i[i].trans_id     = rvfi_issue_pointer_o[i];
-        if (decoded_instr_ready[i]) begin
-            speculative_id_counter = speculative_id_counter + 1;
-        end
 
-        if(decoded_instr_ack_o[i]) begin
-          id_counter = id_counter + 1;
-        end
+    for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+        renamed_instr_i[i].global_rs_id = global_rs_id_q + i;
+        renamed_instr_i[i].trans_id     = rvfi_issue_pointer_o[i];
+        if (decoded_instr_ack_o[i]) id_counter = id_counter + 1;
     end
 
     global_rs_id_n = id_counter;
@@ -486,7 +480,46 @@ module issue_stage
     assign rm_rd_i[j] = issue_instr_sb_iro[j].rd;
   end
 
+  function automatic logic is_flu(fu_t fu);
+    return (fu == CSR | fu == MULT | fu == CTRL_FLOW | fu == NONE);
+  endfunction
 
+  logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_we;
+
+  always_comb begin : rs_write_enable
+
+    rs_we = '0;
+
+    if(!rollback_en_o) begin
+
+      for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
+        if (decoded_instr_i[i].fu == ALU) begin
+
+          if (i == 1 & decoded_instr_i[i-1].fu != ALU | i == 0) begin
+            rs_we[FPU_ALU2][i] = 1'b1;
+          end else begin
+            rs_we[FLU][i] = 1'b1;
+          end
+
+        end
+
+        if (is_flu(decoded_instr_i[i].fu)) begin
+          rs_we[FLU][i] = 1'b1;
+        end
+
+        if (decoded_instr_i[i].fu == FPU | decoded_instr_i[i].fu == FPU_VEC) begin
+          rs_we[FPU_ALU2][i] = 1'b1;
+        end
+
+        if (CVA6Cfg.CvxifEn) begin
+          if (decoded_instr_i[i].fu == CVXIF) begin
+            rs_we[F_CVXIF][i] = 1'b1;
+          end
+        end
+
+      end
+    end
+  end
 
   for (genvar i = 0; i < NR_WB; i++) begin : gen_rs_blocks
     localparam fu_phys fu = fu_phys'(i);
@@ -494,63 +527,23 @@ module issue_stage
     localparam logic is_rs_instanciated =
         (fu == FPU_ALU2) ? (CVA6Cfg.SuperscalarEn || CVA6Cfg.FpPresent) :
         (fu == F_CVXIF)  ? CVA6Cfg.CvxifEn :
-        (fu == LOAD_STORE) ? 1'b0 : // not instanciated when LSQ is used
         1'b1;
 
     if (is_rs_instanciated) begin : rs_instance
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
 
-      logic [CVA6Cfg.TRANS_ID_BITS-1:0]           decoded_instr_trans_id_o;
+      assign we_i = rs_we[fu];
+
+      logic [CVA6Cfg.TRANS_ID_BITS-1:0]   decoded_instr_trans_id_o;
       logic [CVA6Cfg.GlobalRsIdWidth-1:0] decoded_instr_global_id_o;
       logic                               decoded_instr_valid_o;
       logic [CVA6Cfg.NrIssuePorts-1:0]    rs_full_o;
-
-
-
-      for (genvar j = 0; j< CVA6Cfg.NrIssuePorts; j++ ) begin : g_write_enable
-        case (fu)
-          LOAD_STORE :
-            assign we_i[j] = (decoded_instr_i[j].fu == LOAD || decoded_instr_i[j].fu == STORE) && !rollback_en_o;
-
-          FLU :
-            assign we_i[j] =(((decoded_instr_i[1].fu == ALU || decoded_instr_i[1].fu == CSR || decoded_instr_i[1].fu == MULT || decoded_instr_i[1].fu == CTRL_FLOW)
-                      && decoded_instr_i[0].fu == ALU) ?
-                          ((j == 1) ? 1'b1 : 1'b0) :
-                      ((decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
-                          && decoded_instr_i[1].fu == ALU) ?
-                          ((j == 0) ? 1'b1 : 1'b0) :
-                      decoded_instr_i[j].fu == ALU
-                      || decoded_instr_i[j].fu == CSR || decoded_instr_i[j].fu == MULT
-                      || decoded_instr_i[j].fu == CTRL_FLOW || decoded_instr_i[j].fu == NONE) && !rollback_en_o;
-
-          // Since ALU2 and FPU share the same Wb port we only write instr to this rs if
-          // it is an fpu instr or it is an alu instruction and we already wrote one flu instr in
-          // the flu RS. That way we can try to dipacth as much as possible 2 instr to each alu when
-          // possible
-          FPU_ALU2 :
-            assign we_i[j] = (((decoded_instr_i[1].fu == ALU || decoded_instr_i[1].fu == CSR || decoded_instr_i[1].fu == MULT || decoded_instr_i[1].fu == CTRL_FLOW)
-                      && decoded_instr_i[0].fu == ALU) ?
-                          ((j == 0) ? 1'b1 : 1'b0) :
-                      ((decoded_instr_i[0].fu == CSR || decoded_instr_i[0].fu == MULT || decoded_instr_i[0].fu == CTRL_FLOW)
-                          && decoded_instr_i[1].fu == ALU) ?
-                          ((j == 1) ? 1'b1 : 1'b0) :
-                      decoded_instr_i[j].fu == FPU || decoded_instr_i[j].fu == FPU_VEC) && !rollback_en_o;
-
-          F_CVXIF :
-            assign we_i[j] = decoded_instr_i[j].fu == CVXIF && !rollback_en_o;
-
-          default :
-            assign we_i[j] = '0;
-        endcase
-      end
 
       // if fpu not activated then only alu2 will use the FPU wb port
       // so no need to check for fpr register dependency
       // By default cvxif will not check fpr dependency
       localparam logic en_fpr =
-        ((fu == FPU_ALU2 || fu == LOAD_STORE) && CVA6Cfg.FpPresent) ? 1'b1 : 1'b0;
-
-      localparam logic en_lsu = fu == LOAD_STORE;
+        ((fu == FPU_ALU2) && CVA6Cfg.FpPresent) ? 1'b1 : 1'b0;
 
       localparam logic en_csr = fu == FLU;
 
@@ -561,7 +554,6 @@ module issue_stage
         .ADDR_WIDTH         (CVA6Cfg.RegAddrWidth),
         .NR_RS_ENTRIES      (rs_size(fu)),
         .FPR_ENABLED        (en_fpr),
-        .LSU_EN             (en_lsu),
         .CSR_EN             (en_csr),
         .scoreboard_entry_t (scoreboard_entry_t)
       ) i_reservation_station (
@@ -1036,47 +1028,86 @@ module issue_stage
       .rvfi_rs2_o              (rvfi_rs2_o)
   );
 
-  //pragma translate_off
+  // pragma translate_off
+  // =====================================================================
+  //  Assertions
+  // =====================================================================
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin : g_perf_assert
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+      decoded_instr_valid_i[i] && decoded_instr_ack_o[i] && decoded_instr_i[i].fu == LOAD
+      |-> ld_token_valid[i] && !lsq_bypass_full[i])
+    else $error("load accepte sans credit ou avec lsq_bypass plein, port %0d", i);
 
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-    assert property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        decoded_instr_valid_i[i]
-        && decoded_instr_ack_o[i]
-        && decoded_instr_i[i].fu == LOAD
-        |->
-        ld_token_valid[i] && !lsq_bypass_full[i]
-    );
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+      tree_valid[i] |-> issue_instr_sb[i].global_rs_id == tournament_seq_num[winner[i]])
+    else $error("SB et arbre incoherents, port %0d", i);
   end
 
-  int unsigned cnt_ld_token_stall;
-  always_ff @(posedge clk_i) if (rst_ni)
-    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++)
-      if (decoded_instr_valid_i[i] && decoded_instr_i[i].fu == LOAD && !ld_token_valid[i])
-        cnt_ld_token_stall <= cnt_ld_token_stall + 1;
-  final $display("cycles bloqués par ld_token : %0d", cnt_ld_token_stall);
-
-  //pragma translate_on
-
-  // pragma translate_off
   assert property (@(posedge clk_i) disable iff (!rst_ni)
     wt_valid_i[LOAD_WB] && !flush_i |-> wb_valid_o[LOAD_WB])
-  else $error("WB load rejeté par le scoreboard : le crédit serait faux");
-  // pragma translate_on
+  else $error("WB load rejete par le scoreboard : le credit serait faux");
 
-  // pragma translate_off
+  assert property (@(posedge clk_i) disable iff (!rst_ni) ld_token_q <= CVA6Cfg.NrLSQEntries)
+  else $error("ld_token > NrLSQEntries");
+
+  assert property (@(posedge clk_i) disable iff (!rst_ni) st_token_q <= CVA6Cfg.NrLSQEntries)
+  else $error("st_token > NrLSQEntries");
+
   // =====================================================================
   //  Instrumentation performance (simulation uniquement)
+  //
+  //  Les compteurs s'accumulent par fenetres de win_len cycles. Une fenetre
+  //  n'est ajoutee aux totaux que si au moins win_min_commit instructions y
+  //  ont ete commitees : la fin de programme bloquee et les attentes UART
+  //  sont ainsi ecartees automatiquement.
   // =====================================================================
-  longint unsigned c_cycles = 0, c_issued = 0, c_committed = 0;
-  longint unsigned c_iss0 = 0, c_iss1 = 0, c_iss2 = 0;
-  longint unsigned c_mispredict = 0, c_walkback = 0, c_flush = 0;
-  longint unsigned c_st_walkback = 0, c_st_rat = 0, c_st_sb = 0, c_st_rs = 0,
-                   c_st_bypass = 0, c_st_ldtok = 0, c_st_other = 0, c_no_instr = 0;
-  longint unsigned c_st_sttok = 0, c_sb_full = 0;
-  longint unsigned c_dep_stall = 0, c_iro_reject = 0;
-  longint unsigned c_mul_wb = 0, c_mul_consumer = 0;
+  typedef enum int {
+    K_CYCLES, K_ISSUED, K_COMMITTED, K_ISS0, K_ISS1, K_ISS2,
+    K_MISPRED, K_WALKBACK, K_FLUSH, K_SB_FULL,
+    K_ST_WALKBACK, K_ST_RAT, K_ST_SB, K_ST_RS0, K_ST_RS1, K_ST_BYPASS,
+    K_ST_LDTOK, K_ST_OTHER, K_NO_INSTR, K_ST_STTOK, K_LDTOK_ANY,
+    K_HEAD_BLOCKED, K_NO_READY, K_IRO_REJECT,
+    K_ALU_RS0, K_ALU_RS1, K_ALU_IMBALANCE,
+    K_RS0_ALLOC, K_RS0_FT, K_RS1_ALLOC, K_RS1_FT,
+    K_MUL_WB, K_MUL_CONSUMER, K_LDTOK_HELD,
+    K_NB
+  } perf_cnt_e;
 
+  localparam int NB = int'(K_NB);
+
+  longint unsigned win [NB] = '{default: 0};
+  longint unsigned tot [NB] = '{default: 0};
+  longint unsigned win_cycles = 0, win_kept = 0, win_dropped = 0, all_cycles = 0;
+
+  // Parametres, modifiables par plusargs
+  longint unsigned win_len        = 4096;
+  longint unsigned win_min_commit = 205;   // IPC 0,05 sur la fenetre
+  longint unsigned dump_period    = 0;     // 0 = pas d'affichage periodique
+  longint unsigned pc_lo = 0, pc_hi = '1;  // plage d'adresses mesuree (tout par defaut)
+
+  logic dump_req = 1'b0, dump_req_q = 1'b0;  // dump_req forcable depuis la console
+
+  initial begin
+    void'($value$plusargs("win_len=%d",        win_len));
+    void'($value$plusargs("win_min_commit=%d", win_min_commit));
+    void'($value$plusargs("dump_period=%d",    dump_period));
+    void'($value$plusargs("pc_lo=%h",          pc_lo));
+    void'($value$plusargs("pc_hi=%h",          pc_hi));
+  end
+
+  logic measure_en;
+  assign measure_en = (commit_instr_o[0].pc >= pc_lo) && (commit_instr_o[0].pc < pc_hi);
+
+  // ---- signaux internes des RS (RS0 = FLU, RS1 = ALU2)
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs0_we       = gen_rs_blocks[0].rs_instance.we_i;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_we       = gen_rs_blocks[1].rs_instance.we_i;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_full_raw = gen_rs_blocks[1].rs_instance.rs_full_o;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs0_alloc    = gen_rs_blocks[0].rs_instance.i_reservation_station.perf_alloc;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs0_ft       = gen_rs_blocks[0].rs_instance.i_reservation_station.perf_ft;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_alloc    = gen_rs_blocks[1].rs_instance.i_reservation_station.perf_alloc;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_ft       = gen_rs_blocks[1].rs_instance.i_reservation_station.perf_ft;
+
+  // ---- suivi des write-backs MUL
   logic                            mul_wb_d, mul_wb_q2;
   logic [CVA6Cfg.RegAddrWidth-1:0] mul_rd_d, mul_rd_q2;
 
@@ -1095,97 +1126,195 @@ module issue_stage
     end
   end
 
+  int n_ld_in_bypass;
+  always_comb begin
+    n_ld_in_bypass = 0;
+    for (int k = 0; k < CVA6Cfg.NrLSQBypassEntries; k++)
+      if (!i_lsq_bypass.free_q[k] && i_lsq_bypass.instr_queue_q.instr[k].fu == LOAD)
+        n_ld_in_bypass++;
+  end
+
+  // ---- affichage
+  function automatic real ratio(longint unsigned a, longint unsigned b);
+    return (b != 0) ? real'(a) / real'(b) : 0.0;
+  endfunction
+
+  function automatic real pct(longint unsigned x);
+    return 100.0 * ratio(x, tot[K_CYCLES]);
+  endfunction
+
+  function automatic void dump_counters(input string tag);
+    $display("");
+    $display("=========== instrumentation issue_stage (%s) @ %0t ===========", tag, $time);
+    $display("fenetres gardees / ecartees  %0d / %0d   (%0d cycles, seuil %0d commits)",
+             win_kept, win_dropped, win_len, win_min_commit);
+    $display("cycles mesures ............. %0d", tot[K_CYCLES]);
+    $display("instr commitees ............ %0d", tot[K_COMMITTED]);
+    $display("IPC emission / commit ...... %0.3f / %0.3f",
+             ratio(tot[K_ISSUED], tot[K_CYCLES]), ratio(tot[K_COMMITTED], tot[K_CYCLES]));
+    $display("emission 0 / 1 / 2 ......... %0.1f %% / %0.1f %% / %0.1f %%",
+             pct(tot[K_ISS0]), pct(tot[K_ISS1]), pct(tot[K_ISS2]));
+    $display("scoreboard plein ........... %0.2f %% des cycles", pct(tot[K_SB_FULL]));
+
+    $display("--- mauvaises predictions");
+    $display("mispredictions ............. %0d   (%0.2f pour 1000 instr)",
+             tot[K_MISPRED], 1000.0 * ratio(tot[K_MISPRED], tot[K_COMMITTED]));
+    $display("walkback ................... %0.2f %%   (%0.2f cycles/mispredict)",
+             pct(tot[K_WALKBACK]), ratio(tot[K_WALKBACK], tot[K_MISPRED]));
+    $display("front-end a sec ............ %0.2f %%   (%0.2f cycles/mispredict)",
+             pct(tot[K_NO_INSTR]), ratio(tot[K_NO_INSTR], tot[K_MISPRED]));
+    $display("cycles de flush ............ %0d", tot[K_FLUSH]);
+
+    $display("--- blocages du decodage (port 0, par priorite)");
+    $display("walkback ................... %0.2f %%", pct(tot[K_ST_WALKBACK]));
+    $display("plus de registre phys ...... %0.2f %%", pct(tot[K_ST_RAT]));
+    $display("scoreboard plein ........... %0.2f %%", pct(tot[K_ST_SB]));
+    $display("RS0 (FLU) pleine ........... %0.2f %%", pct(tot[K_ST_RS0]));
+    $display("RS1 (ALU2) pleine .......... %0.2f %%", pct(tot[K_ST_RS1]));
+    $display("lsq_bypass plein ........... %0.2f %%", pct(tot[K_ST_BYPASS]));
+    $display("credit load ................ %0.2f %%", pct(tot[K_ST_LDTOK]));
+    $display("autre ...................... %0.2f %%", pct(tot[K_ST_OTHER]));
+    $display("credit load (tous ports) ... %0.2f %%", pct(tot[K_LDTOK_ANY]));
+    $display("credit store (dispatch) .... %0.2f %%", pct(tot[K_ST_STTOK]));
+    $display("credit load detenu en bypass %0.2f %%   (potentiel du credit au dispatch)", pct(tot[K_LDTOK_HELD]));
+
+    $display("--- cycles sans emission");
+    $display("tete de ROB bloquee ........ %0.2f %%   (scoreboard plein, rien a emettre)", pct(tot[K_HEAD_BLOCKED]));
+    $display("rien de pret ............... %0.2f %%   (dependances ou famine)",           pct(tot[K_NO_READY]));
+    $display("candidat refuse par IRO .... %0.2f %%", pct(tot[K_IRO_REJECT]));
+
+    $display("--- aiguillage des ALU");
+    $display("ALU vers RS0 / RS1 ......... %0d / %0d   (%0.1f %% vers RS0)",
+             tot[K_ALU_RS0], tot[K_ALU_RS1],
+             100.0 * ratio(tot[K_ALU_RS0], tot[K_ALU_RS0] + tot[K_ALU_RS1]));
+    $display("ALU bloquee, RS1 libre ..... %0.2f %%   (potentiel du reequilibrage)", pct(tot[K_ALU_IMBALANCE]));
+
+    $display("--- potentiel fallthrough RS (borne sup.)");
+    $display("RS0 ........................ %0d / %0d alloc (%0.1f %%) -> %0.2f %% des cycles",
+             tot[K_RS0_FT], tot[K_RS0_ALLOC], 100.0 * ratio(tot[K_RS0_FT], tot[K_RS0_ALLOC]), pct(tot[K_RS0_FT]));
+    $display("RS1 ........................ %0d / %0d alloc (%0.1f %%) -> %0.2f %% des cycles",
+             tot[K_RS1_FT], tot[K_RS1_ALLOC], 100.0 * ratio(tot[K_RS1_FT], tot[K_RS1_ALLOC]), pct(tot[K_RS1_FT]));
+
+    $display("--- potentiel wakeup MUL (borne sup.)");
+    $display("write-backs MUL ............ %0d", tot[K_MUL_WB]);
+    $display("consommateurs a WB+1 ....... %0d   (%0.2f %% des cycles)", tot[K_MUL_CONSUMER], pct(tot[K_MUL_CONSUMER]));
+  endfunction
+
+  // ---- comptage
   always_ff @(posedge clk_i) begin
     automatic int n_iss = 0;
+    automatic int n_com = 0;
 
-    mul_wb_q2 <= mul_wb_d;
-    mul_rd_q2 <= mul_rd_d;
+    mul_wb_q2  <= mul_wb_d;
+    mul_rd_q2  <= mul_rd_d;
+    dump_req_q <= dump_req;
 
-    if (rst_ni) begin
-      c_cycles++;
+    if (rst_ni) all_cycles++;
 
-      // ---- débit
-      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) if (rm_i[i]) n_iss++;
-      c_issued += n_iss;
+    if (rst_ni && measure_en) begin
+      for (int i = 0; i < CVA6Cfg.NrIssuePorts;  i++) if (rm_i[i])         n_iss++;
+      for (int i = 0; i < CVA6Cfg.NrCommitPorts; i++) if (commit_ack_i[i]) n_com++;
+
+      // ---- debit
+      win[K_CYCLES]++;
+      win[K_ISSUED]    += n_iss;
+      win[K_COMMITTED] += n_com;
       case (n_iss)
-        0: c_iss0++;
-        1: c_iss1++;
-        default: c_iss2++;
+        0:       win[K_ISS0]++;
+        1:       win[K_ISS1]++;
+        default: win[K_ISS2]++;
       endcase
-      for (int i = 0; i < CVA6Cfg.NrCommitPorts; i++) if (commit_ack_i[i]) c_committed++;
-      if (sb_full_o) c_sb_full++;
+      if (sb_full_o) win[K_SB_FULL]++;
 
-      // ---- coût des mauvaises prédictions
-      if (resolved_branch_i.valid && resolved_branch_i.is_mispredict) c_mispredict++;
-      if (rollback_active) c_walkback++;
-      if (flush_i) c_flush++;
+      // ---- mauvaises predictions
+      if (resolved_branch_i.valid && resolved_branch_i.is_mispredict) win[K_MISPRED]++;
+      if (rollback_active) win[K_WALKBACK]++;
+      if (flush_i)         win[K_FLUSH]++;
 
-      // ---- pourquoi le décodage ne passe pas (port 0 : il commande la chaîne)
+      if (decoded_instr_valid_i[0] && decoded_instr_i[0].fu == LOAD &&
+          !ld_token_valid[0] && n_ld_in_bypass > 0)
+        win[K_LDTOK_HELD]++;
+
+      // ---- blocages du decodage (port 0 : il commande la chaine)
       if (decoded_instr_valid_i[0] && !decoded_instr_ready[0]) begin
-        if (rollback_active)                               c_st_walkback++;
-        else if (empty_gpr[0] && issue_we_i[0])            c_st_rat++;
-        else if (!issue_instr_ack[0])                      c_st_sb++;
-        else if (final_rs_full[0])                         c_st_rs++;
-        else if (lsq_bypass_we[0] && lsq_bypass_full[0])   c_st_bypass++;
-        else if (lsq_bypass_we[0] && !lsq_token_valid[0])  c_st_ldtok++;
-        else                                               c_st_other++;
+        if (rollback_active)                               win[K_ST_WALKBACK]++;
+        else if (empty_gpr[0] && issue_we_i[0])            win[K_ST_RAT]++;
+        else if (!issue_instr_ack[0])                      win[K_ST_SB]++;
+        else if (rs_full[0][0])                            win[K_ST_RS0]++;
+        else if (final_rs_full[0])                         win[K_ST_RS1]++;
+        else if (lsq_bypass_we[0] && lsq_bypass_full[0])   win[K_ST_BYPASS]++;
+        else if (lsq_bypass_we[0] && !lsq_token_valid[0])  win[K_ST_LDTOK]++;
+        else                                               win[K_ST_OTHER]++;
       end else if (!decoded_instr_valid_i[0]) begin
-        c_no_instr++;
+        win[K_NO_INSTR]++;
       end
 
-      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++)
+      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
         if (lsq_dispatch_instr_valid[i] && lsq_dispatch_instr_fu[i] == STORE && !st_token_valid[i])
-          c_st_sttok++;
-
-      // ---- pourquoi rien n'est émis
-      if (n_iss == 0 && !flush_i && !rollback_active) begin
-        if (!(|tree_valid)) c_dep_stall++;   // aucun candidat prêt : dépendances vraies
-        else                c_iro_reject++;  // candidat prêt mais l'IRO refuse
+          win[K_ST_STTOK]++;
+        if (decoded_instr_valid_i[i] && decoded_instr_i[i].fu == LOAD && !ld_token_valid[i])
+          win[K_LDTOK_ANY]++;
       end
 
-      // ---- potentiel du wakeup spéculatif des MUL
-      if (mul_wb_d) c_mul_wb++;
+      // ---- cycles sans emission
+      if (n_iss == 0 && !flush_i && !rollback_active) begin
+        if (|tree_valid)    win[K_IRO_REJECT]++;
+        else if (sb_full_o) win[K_HEAD_BLOCKED]++;
+        else                win[K_NO_READY]++;
+      end
+
+      // ---- aiguillage des ALU entre RS0 (FLU) et RS1 (ALU2)
+      for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+        if (decoded_instr_ack_o[j] && decoded_instr_i[j].fu == ALU) begin
+          if (rs0_we[j]) win[K_ALU_RS0]++;
+          if (rs1_we[j]) win[K_ALU_RS1]++;
+        end
+      end
+      if (decoded_instr_valid_i[0] && decoded_instr_i[0].fu == ALU &&
+          rs_full[0][0] && !rs1_full_raw[0])
+        win[K_ALU_IMBALANCE]++;
+
+      // ---- potentiel fallthrough RS
+      for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+        if (rs0_alloc[j]) win[K_RS0_ALLOC]++;
+        if (rs0_ft[j])    win[K_RS0_FT]++;
+        if (rs1_alloc[j]) win[K_RS1_ALLOC]++;
+        if (rs1_ft[j])    win[K_RS1_FT]++;
+      end
+
+      // ---- potentiel wakeup MUL
+      if (mul_wb_d) win[K_MUL_WB]++;
       if (mul_wb_q2) begin
         for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
           if (rm_i[i] && mul_rd_q2 != '0 &&
               ((issue_instr_sb_iro[i].rs1 == mul_rd_q2) ||
                (!issue_instr_sb_iro[i].use_imm && issue_instr_sb_iro[i].rs2 == mul_rd_q2)))
-            c_mul_consumer++;
+            win[K_MUL_CONSUMER]++;
         end
       end
+
+      // ---- cloture de la fenetre
+      win_cycles++;
+      if (win_cycles >= win_len) begin
+        if (win[K_COMMITTED] >= win_min_commit) begin
+          foreach (tot[k]) tot[k] += win[k];
+          win_kept++;
+        end else begin
+          win_dropped++;
+        end
+        foreach (win[k]) win[k] = 0;
+        win_cycles = 0;
+      end
     end
+
+    // ---- affichages intermediaires
+    if (rst_ni && dump_req && !dump_req_q)
+      dump_counters("demande");
+    if (rst_ni && dump_period != 0 && (all_cycles % dump_period) == 0)
+      dump_counters("periodique");
   end
 
-  final begin
-    $display("=========== instrumentation issue_stage ===========");
-    $display("cycles ................... %0d", c_cycles);
-    $display("instr emises ............. %0d   (IPC issue %0.3f)", c_issued, real'(c_issued)/real'(c_cycles));
-    $display("instr commitees .......... %0d   (IPC commit %0.3f)", c_committed, real'(c_committed)/real'(c_cycles));
-    $display("emission 0/1/2 par cycle . %0d / %0d / %0d", c_iss0, c_iss1, c_iss2);
-    $display("--- mauvaises predictions");
-    $display("mispredictions ........... %0d", c_mispredict);
-    $display("cycles en walkback ....... %0d  (%0.2f %% des cycles, %0.2f cycles/mispredict)",
-             c_walkback, 100.0*real'(c_walkback)/real'(c_cycles),
-             c_mispredict ? real'(c_walkback)/real'(c_mispredict) : 0.0);
-    $display("cycles de flush .......... %0d", c_flush);
-    $display("--- blocages du decodage (port 0)");
-    $display("walkback ................. %0d", c_st_walkback);
-    $display("plus de registre phys .... %0d", c_st_rat);
-    $display("scoreboard plein ......... %0d   (cycles sb_full : %0d)", c_st_sb, c_sb_full);
-    $display("RS pleine ................ %0d", c_st_rs);
-    $display("lsq_bypass plein ......... %0d", c_st_bypass);
-    $display("credit load ............. %0d", c_st_ldtok);
-    $display("autre .................... %0d", c_st_other);
-    $display("front-end a sec .......... %0d", c_no_instr);
-    $display("credit store (dispatch) .. %0d", c_st_sttok);
-    $display("--- cycles sans emission");
-    $display("aucun candidat pret ...... %0d  (%0.2f %%)", c_dep_stall, 100.0*real'(c_dep_stall)/real'(c_cycles));
-    $display("candidat refuse par IRO .. %0d  (%0.2f %%)", c_iro_reject, 100.0*real'(c_iro_reject)/real'(c_cycles));
-    $display("--- potentiel wakeup MUL");
-    $display("write-backs MUL .......... %0d", c_mul_wb);
-    $display("consommateurs a WB+1 ..... %0d  (borne sup. du gain : %0.2f %% des cycles)",
-             c_mul_consumer, 100.0*real'(c_mul_consumer)/real'(c_cycles));
-  end
+  final dump_counters("fin de simulation");
   // pragma translate_on
 
 endmodule

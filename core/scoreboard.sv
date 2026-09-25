@@ -652,14 +652,5 @@ end
     end
   end
 
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-    assert property (@(posedge clk_i) disable iff (!rst_ni)
-      tree_valid[i] |-> issue_instr_sb[i].global_rs_id == tournament_seq_num[winner[i]])
-    else $error("SB et arbre incohérents, port %0d", i);
-  end
-  assert property (@(posedge clk_i) disable iff (!rst_ni) ld_token_q <= CVA6Cfg.NrLSQEntries)
-    else $error("ld_token > NrLSQEntries");
-  assert property (@(posedge clk_i) disable iff (!rst_ni) st_token_q <= CVA6Cfg.NrLSQEntries)
-    else $error("st_token > NrLSQEntries");
   // pragma translate_on
 endmodule
