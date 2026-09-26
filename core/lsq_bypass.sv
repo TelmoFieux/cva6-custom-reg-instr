@@ -136,60 +136,96 @@ module lsq_bypass
     instr_queue_n = instr_queue_q;
     issue_pointer_n = issue_pointer_q;
 
-    if (!FALLTHROUGH) begin
-      for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
-        if (we[i] & free_q[issue_pointer] & decoded_instr_ack_i[i]) begin
-          instr_queue_n.instr[issue_pointer] =
-            {
-            decoded_instr_i[i].trans_id,
-            decoded_instr_i[i].global_rs_id,
-            decoded_instr_i[i].op,
-            decoded_instr_i[i].rs1,
-            decoded_instr_i[i].rs2,
-            decoded_instr_i[i].rd,
-            decoded_instr_i[i].fu,
-            decoded_instr_i[i].use_imm
-            };
-          instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
-          instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
-          free_n[issue_pointer] = 1'b0;
-          issue_pointer = issue_pointer + 1'b1;
-        end
-      end
-    end else begin
-      for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
-        if (we[i] & free_q[issue_pointer] & decoded_instr_ack_i[i]) begin
-            instr_queue_n.instr[issue_pointer] =
-              {
-              decoded_instr_i[i].trans_id,
-              decoded_instr_i[i].global_rs_id,
-              decoded_instr_i[i].op,
-              decoded_instr_i[i].rs1,
-              decoded_instr_i[i].rs2,
-              decoded_instr_i[i].rd,
-              decoded_instr_i[i].fu,
-              decoded_instr_i[i].use_imm
-              };
-            instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
-            instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
-            free_n[issue_pointer] = 1'b0;
-            issue_pointer = issue_pointer + 1'b1;
-          for (int unsigned j = 0; j<CVA6Cfg.NrIssuePorts ; j++) begin
-            if (rm_i[j] & rm_id_i[j] == decoded_instr_i[i].global_rs_id) begin
-              issue_pointer = issue_pointer - 1'b1;
-              free_n[issue_pointer] = 1'b1;
-            end
-          end
-        end
+    for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
+      if (we[i] & free_q[issue_pointer]) begin
+        instr_queue_n.instr[issue_pointer] =
+          {
+          decoded_instr_i[i].trans_id,
+          decoded_instr_i[i].global_rs_id,
+          decoded_instr_i[i].op,
+          decoded_instr_i[i].rs1,
+          decoded_instr_i[i].rs2,
+          decoded_instr_i[i].rd,
+          decoded_instr_i[i].fu,
+          decoded_instr_i[i].use_imm
+          };
+        instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
+        instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
+        issue_pointer = issue_pointer + 1'b1;
       end
     end
 
+
+
+        // if (!FALLTHROUGH) begin
+    //   for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
+    //     if (we[i] & free_q[issue_pointer] & decoded_instr_ack_i[i]) begin
+    //       instr_queue_n.instr[issue_pointer] =
+    //         {
+    //         decoded_instr_i[i].trans_id,
+    //         decoded_instr_i[i].global_rs_id,
+    //         decoded_instr_i[i].op,
+    //         decoded_instr_i[i].rs1,
+    //         decoded_instr_i[i].rs2,
+    //         decoded_instr_i[i].rd,
+    //         decoded_instr_i[i].fu,
+    //         decoded_instr_i[i].use_imm
+    //         };
+    //       instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
+    //       instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
+    //       free_n[issue_pointer] = 1'b0;
+    //       issue_pointer = issue_pointer + 1'b1;
+    //     end
+    //   end
+    // end else begin
+    //   for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
+    //     if (we[i] & free_q[issue_pointer] & decoded_instr_ack_i[i]) begin
+    //         instr_queue_n.instr[issue_pointer] =
+    //           {
+    //           decoded_instr_i[i].trans_id,
+    //           decoded_instr_i[i].global_rs_id,
+    //           decoded_instr_i[i].op,
+    //           decoded_instr_i[i].rs1,
+    //           decoded_instr_i[i].rs2,
+    //           decoded_instr_i[i].rd,
+    //           decoded_instr_i[i].fu,
+    //           decoded_instr_i[i].use_imm
+    //           };
+    //         instr_queue_n.vaddr_trans_id[issue_pointer] = vaddr_trans_id_i[i];
+    //         instr_queue_n.data_trans_id[issue_pointer] = data_trans_id_i[i];
+    //         free_n[issue_pointer] = 1'b0;
+    //         issue_pointer = issue_pointer + 1'b1;
+    //       for (int unsigned j = 0; j<CVA6Cfg.NrIssuePorts ; j++) begin
+    //         if (rm_i[j] & rm_id_i[j] == decoded_instr_i[i].global_rs_id) begin
+    //           issue_pointer = issue_pointer - 1'b1;
+    //           free_n[issue_pointer] = 1'b1;
+    //         end
+    //       end
+    //     end
+    //   end
+    // end
+
     rm_ptr = dispatch_pointer_q;
+    issue_pointer = issue_pointer_q;
 
     for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
       if (rm_i[j] && !free_q[rm_ptr] && rm_id_i[j] == instr_queue_q.instr[rm_ptr].global_id) begin
         free_n[rm_ptr] = 1'b1;
         rm_ptr = rm_ptr + 1'b1;
+      end
+    end
+
+    for (int unsigned i = 0; i<CVA6Cfg.NrIssuePorts ; i++) begin
+      if (we[i] && decoded_instr_ack_i[i]) begin
+        free_n[issue_pointer] = 1'b0;
+        for (int unsigned j = 0; j<CVA6Cfg.NrIssuePorts ; j++) begin
+          // fallthrough triggered
+          if (rm_i[j] & rm_id_i[j] == decoded_instr_i[i].global_rs_id) begin
+            free_n[issue_pointer] = 1'b1;
+            rm_ptr = rm_ptr + 1'b1;
+          end
+        end
+        issue_pointer = issue_pointer + 1'b1;
       end
     end
 

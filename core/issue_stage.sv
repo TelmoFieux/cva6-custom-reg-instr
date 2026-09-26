@@ -602,12 +602,11 @@ module issue_stage
       for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
         if (decoded_instr_i[i].fu == ALU) begin
 
-          if (i == 1 & decoded_instr_i[i-1].fu != ALU | i == 0) begin
+          if (i == 0 || decoded_instr_i[0].fu != ALU) begin
             rs_we[FPU_ALU2][i] = 1'b1;
           end else begin
-            rs_we[FLU][i] = 1'b1;
+            rs_we[FLU][i]      = 1'b1;
           end
-
         end
 
         if (is_flu(decoded_instr_i[i].fu)) begin
@@ -663,6 +662,7 @@ module issue_stage
         .NR_RS_ENTRIES      (rs_size(fu)),
         .FPR_ENABLED        (en_fpr),
         .CSR_EN             (en_csr),
+        .FALLTHROUGH        (1'b1),
         .scoreboard_entry_t (scoreboard_entry_t),
         .decoded_instr_early_t (decoded_instr_early_t)
       ) i_reservation_station (

@@ -32,6 +32,7 @@ module reservation_station
     parameter int unsigned           NR_RS_ENTRIES = 4,
     parameter int unsigned           FPR_ENABLED   = 0,
     parameter int unsigned           CSR_EN        = 0, // does this RS contains CSR instr
+    parameter int unsigned           FALLTHROUGH   = 0,
     parameter type decoded_instr_early_t = logic,
     parameter type scoreboard_entry_t = logic
 ) (
