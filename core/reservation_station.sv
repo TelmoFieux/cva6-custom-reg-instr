@@ -32,6 +32,7 @@ module reservation_station
     parameter int unsigned           NR_RS_ENTRIES = 4,
     parameter int unsigned           FPR_ENABLED   = 0,
     parameter int unsigned           CSR_EN        = 0, // does this RS contains CSR instr
+    parameter type decoded_instr_early_t = logic,
     parameter type scoreboard_entry_t = logic
 ) (
     input  logic                                                         clk_i,
@@ -45,6 +46,8 @@ module reservation_station
     input  logic [CVA6Cfg.NrWbPorts-1:0]                                 wb_valid_i,
     input  logic [CVA6Cfg.NrWbPorts-1:0][ADDR_WIDTH-1:0]                 wb_rd_i, // dest reg of the entry to remove
     input  fu_op [CVA6Cfg.NrWbPorts-1:0]                                 wb_op_i, // op of the entry to remove
+    input logic [CVA6Cfg.NrPhysReg-1:0]                                  is_result_available_gpr_i,
+    input logic [CVA6Cfg.NrPhysReg-1:0]                                  is_result_available_fpr_i,
     input  logic [CVA6Cfg.RollbackWidth-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]rollback_id_i, // id of the entry to rollback
     input  logic [CVA6Cfg.RollbackWidth-1:0]                             rollback_en_i, // is rollback enabled
     input  logic [CVA6Cfg.RollbackWidth-1:0][ADDR_WIDTH-1:0]             rollback_rd_i, // architectural register to rollback
@@ -58,6 +61,7 @@ module reservation_station
 
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                             decoded_instr_trans_id_o,
     output logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           decoded_instr_global_id_o,
+    output decoded_instr_early_t                                         decoded_instr_early_o,
     output logic                                                         decoded_instr_valid_o //is instruction valid
 
 );
@@ -83,13 +87,7 @@ module reservation_station
     logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] valid_regs;
   } reservation_station_t;
 
-
-  logic [NUM_REG-1:0] is_result_available_gpr_n, is_result_available_gpr_q;
-  //some operations might use gpr and fpr register as operands or destination
-  logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
-
   reservation_station_t rs_n, rs_q;
-
 
   logic [CVA6Cfg.NrIssuePorts:0][NR_RS_ENTRIES-1:0] free_entries_masked;
   logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
@@ -159,46 +157,20 @@ module reservation_station
   assign decoded_instr_trans_id_o = rs_q.rs_table[winner_o].trans_id;
   assign decoded_instr_global_id_o = rs_q.rs_table[winner_o].global_rs_id;
 
+  assign decoded_instr_early_o = '{
+    rs1:     rs_q.rs_table[winner_o].rs1,
+    rs2:     rs_q.rs_table[winner_o].rs2,
+    rd:      rs_q.rs_table[winner_o].rd,
+    fu:      rs_q.rs_table[winner_o].fu,
+    op:      rs_q.rs_table[winner_o].op,
+    use_imm: rs_q.rs_table[winner_o].use_imm
+  };
+
 
   always_comb begin : updating_rs
     logic allocated_by_p0;
     logic allocated_by_p1;
     rs_n = rs_q;
-    is_result_available_gpr_n = is_result_available_gpr_q;
-
-    if (FPR_ENABLED) begin
-      is_result_available_fpr_n = is_result_available_fpr_q;
-    end
-
-    //updating based on write back
-    for (int i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
-      if (wb_valid_i[i]) begin
-        if (FPR_ENABLED) begin
-          if (is_rd_fpr(wb_op_i[i])) begin
-            is_result_available_fpr_n[wb_rd_i[i]] = 1'b1;
-          end else begin
-            is_result_available_gpr_n[wb_rd_i[i]] = 1'b1;
-          end
-        end else begin
-          is_result_available_gpr_n[wb_rd_i[i]] = 1'b1;
-        end
-      end
-    end
-
-    //updating based on speculative wakeup
-    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (rm_i[i] && instr_cycle_count(rm_op_i[i]) == 1'b1) begin
-        if (FPR_ENABLED) begin
-          if (is_rd_fpr(rm_op_i[i])) begin
-            is_result_available_fpr_n[rm_rd_i[i]] = 1'b1;
-          end else begin
-            is_result_available_gpr_n[rm_rd_i[i]] = 1'b1;
-          end
-        end else begin
-          is_result_available_gpr_n[rm_rd_i[i]] = 1'b1;
-        end
-      end
-    end
 
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (decoded_instr_ack_i[i]) begin
@@ -216,32 +188,6 @@ module reservation_station
             decoded_instr_i[i].use_imm,
             decoded_instr_i[i].ex.valid
             };
-        end
-
-        //always update dependency based on newly issued instr
-        if (FPR_ENABLED) begin
-          if (is_rd_fpr(decoded_instr_i[i].op)) begin
-            is_result_available_fpr_n[decoded_instr_i[i].rd] = 1'b0;
-          end else begin
-            is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
-          end
-        end else begin
-          is_result_available_gpr_n[decoded_instr_i[i].rd] = 1'b0;
-        end
-      end
-    end
-
-    // updating dependencies during rollback
-    for (int unsigned i = 0; i<CVA6Cfg.RollbackWidth ; i++) begin
-      if (rollback_en_i[i]) begin
-        if (FPR_ENABLED) begin
-          if (is_rd_fpr(rollback_op_i[i])) begin
-            is_result_available_fpr_n[rollback_rd_i[i]] = 1'b1;
-          end else begin
-            is_result_available_gpr_n[rollback_rd_i[i]] = 1'b1;
-          end
-        end else begin
-          is_result_available_gpr_n[rollback_rd_i[i]] = 1'b1;
         end
       end
     end
@@ -432,37 +378,37 @@ module reservation_station
       //Finally we define the default behavior
       if (!FPR_ENABLED) begin
         if (allocated_by_p0) begin
-          updated_regs[i][0] = is_result_available_gpr_q[decoded_instr_i[0].rs1];
-          updated_regs[i][1] = is_result_available_gpr_q[decoded_instr_i[0].rs2];
+          updated_regs[i][0] = is_result_available_gpr_i[decoded_instr_i[0].rs1];
+          updated_regs[i][1] = is_result_available_gpr_i[decoded_instr_i[0].rs2];
           if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm)
-            updated_regs[i][2] = is_result_available_gpr_q[decoded_instr_i[0].result];
+            updated_regs[i][2] = is_result_available_gpr_i[decoded_instr_i[0].result];
         end else if (allocated_by_p1) begin
-          updated_regs[i][0] = is_result_available_gpr_q[decoded_instr_i[1].rs1];
-          updated_regs[i][1] = is_result_available_gpr_q[decoded_instr_i[1].rs2];
+          updated_regs[i][0] = is_result_available_gpr_i[decoded_instr_i[1].rs1];
+          updated_regs[i][1] = is_result_available_gpr_i[decoded_instr_i[1].rs2];
           if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm)
-            updated_regs[i][2] = is_result_available_gpr_q[decoded_instr_i[1].result];
+            updated_regs[i][2] = is_result_available_gpr_i[decoded_instr_i[1].result];
         end else begin
-          updated_regs[i][0] =  is_result_available_gpr_q[rs_q.rs_table[i].rs1];
-          updated_regs[i][1] = is_result_available_gpr_q[rs_q.rs_table[i].rs2];
+          updated_regs[i][0] = rs_q.valid_regs[i][0];
+          updated_regs[i][1] = rs_q.valid_regs[i][1];
           if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm)
-            updated_regs[i][2] = is_result_available_gpr_q[rs_q.rs_table[i].result];
+            updated_regs[i][2] = rs_q.valid_regs[i][2];
         end
       end else begin
         if (allocated_by_p0) begin
-          updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_q[decoded_instr_i[0].rs1] : is_result_available_gpr_q[decoded_instr_i[0].rs1];
-          updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_q[decoded_instr_i[0].rs2] : is_result_available_gpr_q[decoded_instr_i[0].rs2];
+          updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_i[decoded_instr_i[0].rs1] : is_result_available_gpr_i[decoded_instr_i[0].rs1];
+          updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_i[decoded_instr_i[0].rs2] : is_result_available_gpr_i[decoded_instr_i[0].rs2];
           if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm)
-            updated_regs[i][2] = is_imm_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_q[decoded_instr_i[0].result] : is_result_available_gpr_q[decoded_instr_i[0].result];
+            updated_regs[i][2] = is_imm_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_i[decoded_instr_i[0].result] : is_result_available_gpr_i[decoded_instr_i[0].result];
         end else if (allocated_by_p1) begin
-          updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_q[decoded_instr_i[1].rs1] : is_result_available_gpr_q[decoded_instr_i[1].rs1];
-          updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_q[decoded_instr_i[1].rs2] : is_result_available_gpr_q[decoded_instr_i[1].rs2];
+          updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_i[decoded_instr_i[1].rs1] : is_result_available_gpr_i[decoded_instr_i[1].rs1];
+          updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_i[decoded_instr_i[1].rs2] : is_result_available_gpr_i[decoded_instr_i[1].rs2];
           if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm)
-            updated_regs[i][2] = is_imm_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_q[decoded_instr_i[1].result] : is_result_available_gpr_q[decoded_instr_i[1].result];
+            updated_regs[i][2] = is_imm_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_i[decoded_instr_i[1].result] : is_result_available_gpr_i[decoded_instr_i[1].result];
         end else begin
-          updated_regs[i][0] = is_rs1_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs1] : is_result_available_gpr_q[rs_q.rs_table[i].rs1];
-          updated_regs[i][1] = is_rs2_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].rs2] : is_result_available_gpr_q[rs_q.rs_table[i].rs2];
+          updated_regs[i][0] = rs_q.valid_regs[i][0];
+          updated_regs[i][1] = rs_q.valid_regs[i][1];
           if (NR_READ_PORTS == 3 && !rs_q.rs_table[i].use_imm)
-            updated_regs[i][2] = is_imm_fpr(rs_q.rs_table[i].op) ? is_result_available_fpr_q[rs_q.rs_table[i].result] : is_result_available_gpr_q[rs_q.rs_table[i].result];
+            updated_regs[i][2] = rs_q.valid_regs[i][2];
         end
       end
 
@@ -533,16 +479,10 @@ module reservation_station
       end
     end
 
-    is_result_available_gpr_n[0] = '1;
-
     if (rs_restore_en_i) begin
       rs_n.free_entries = '1;
       rs_n.valid_regs = '0;
       rs_n.rs_table = '0;
-      is_result_available_gpr_n = '1;
-      if (FPR_ENABLED) begin
-        is_result_available_fpr_n = '1;
-      end
     end
   end
 
@@ -551,16 +491,8 @@ module reservation_station
       rs_q.free_entries <= '1;
       rs_q.valid_regs   <= '0;
       rs_q.rs_table     <= '0;
-      if (FPR_ENABLED) begin
-        is_result_available_fpr_q <= '1;
-      end
-      is_result_available_gpr_q <= '1;
     end else begin
       rs_q <= rs_n;
-      is_result_available_gpr_q <= is_result_available_gpr_n;
-      if (FPR_ENABLED) begin
-        is_result_available_fpr_q <= is_result_available_fpr_n;
-      end
     end
   end
 

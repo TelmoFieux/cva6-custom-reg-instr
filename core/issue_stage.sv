@@ -444,13 +444,21 @@ module issue_stage
 
   end
 
+
   // ---------------------------------------------------------
-  // 2. Manage instructions in reservation stations
+  // 2. Update available results
   // ---------------------------------------------------------
 
-  // localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 4 : 3;
-  // With lsq no more LOAD_STORE_RS
   localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 3 : 2;
+
+  typedef struct packed {
+    fu_t fu;
+    fu_op op;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rs1;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rs2;
+    logic [CVA6Cfg.RegAddrWidth-1:0] rd;
+    logic use_imm;
+  } decoded_instr_early_t;
 
   logic [CVA6Cfg.NrIssuePorts-1:0] lsq_bypass_full;
   logic [CVA6Cfg.NrIssuePorts-1:0] lsq_bypass_we;
@@ -461,6 +469,7 @@ module issue_stage
 
   logic [NR_WB-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] rs_trans_id;
   logic [NR_WB-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rs_global_id;
+  decoded_instr_early_t [NR_WB-1:0] rs_early_data;
   logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_full;
   logic [NR_WB-1:0] rs_valid;
 
@@ -479,6 +488,104 @@ module issue_stage
     assign rm_op_i[j] = issue_instr_sb_iro[j].op;
     assign rm_rd_i[j] = issue_instr_sb_iro[j].rd;
   end
+
+  localparam NUM_REG = CVA6Cfg.NrPhysReg;
+  localparam FPR_ENABLED = CVA6Cfg.FpPresent;
+
+  logic [NUM_REG-1:0] is_result_available_gpr_n, is_result_available_gpr_q;
+  logic [NUM_REG-1:0] is_result_available_fpr_n, is_result_available_fpr_q;
+
+  always_comb begin : updating_result_available
+    is_result_available_gpr_n = is_result_available_gpr_q;
+
+    if (FPR_ENABLED) begin
+      is_result_available_fpr_n = is_result_available_fpr_q;
+    end
+
+    //updating based on write back
+    for (int i = 0; i < CVA6Cfg.NrWbPorts; i++) begin
+      if (wb_valid_o[i]) begin
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(wb_op_o[i])) begin
+            is_result_available_fpr_n[wbaddr_o[i]] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[wbaddr_o[i]] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[wbaddr_o[i]] = 1'b1;
+        end
+      end
+    end
+
+    //updating based on speculative wakeup
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (rm_i[i] && instr_cycle_count(rm_op_i[i]) == 1'b1) begin
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(rm_op_i[i])) begin
+            is_result_available_fpr_n[rm_rd_i[i]] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[rm_rd_i[i]] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[rm_rd_i[i]] = 1'b1;
+        end
+      end
+    end
+
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      if (decoded_instr_ack_o[i]) begin
+        //always update dependency based on newly issued instr
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(renamed_instr_i[i].op)) begin
+            is_result_available_fpr_n[renamed_instr_i[i].rd] = 1'b0;
+          end else begin
+            is_result_available_gpr_n[renamed_instr_i[i].rd] = 1'b0;
+          end
+        end else begin
+          is_result_available_gpr_n[renamed_instr_i[i].rd] = 1'b0;
+        end
+      end
+    end
+
+    // updating dependencies during rollback
+    for (int unsigned i = 0; i<CVA6Cfg.RollbackWidth ; i++) begin
+      if (rollback_we_i[i]) begin
+        if (FPR_ENABLED) begin
+          if (is_rd_fpr(rollback_op_i[i])) begin
+            is_result_available_fpr_n[rollback_rd_i[i]] = 1'b1;
+          end else begin
+            is_result_available_gpr_n[rollback_rd_i[i]] = 1'b1;
+          end
+        end else begin
+          is_result_available_gpr_n[rollback_rd_i[i]] = 1'b1;
+        end
+      end
+    end
+
+
+    is_result_available_gpr_n[0] = '1;
+
+    if (flush_i) begin
+      is_result_available_gpr_n = '1;
+      if (FPR_ENABLED) begin
+        is_result_available_fpr_n = '1;
+      end
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      is_result_available_fpr_q <= '1;
+      is_result_available_gpr_q <= '1;
+    end else begin
+      is_result_available_fpr_q <= is_result_available_fpr_n;
+      is_result_available_gpr_q <= is_result_available_gpr_n;
+    end
+  end
+
+  // ---------------------------------------------------------
+  // 2. Manage instructions in reservation stations
+  // ---------------------------------------------------------
 
   function automatic logic is_flu(fu_t fu);
     return (fu == CSR | fu == MULT | fu == CTRL_FLOW | fu == NONE);
@@ -538,6 +645,7 @@ module issue_stage
       logic [CVA6Cfg.GlobalRsIdWidth-1:0] decoded_instr_global_id_o;
       logic                               decoded_instr_valid_o;
       logic [CVA6Cfg.NrIssuePorts-1:0]    rs_full_o;
+      decoded_instr_early_t               rs_decoded_instr_early;
 
       // if fpu not activated then only alu2 will use the FPU wb port
       // so no need to check for fpr register dependency
@@ -555,7 +663,8 @@ module issue_stage
         .NR_RS_ENTRIES      (rs_size(fu)),
         .FPR_ENABLED        (en_fpr),
         .CSR_EN             (en_csr),
-        .scoreboard_entry_t (scoreboard_entry_t)
+        .scoreboard_entry_t (scoreboard_entry_t),
+        .decoded_instr_early_t (decoded_instr_early_t)
       ) i_reservation_station (
         .clk_i                      (clk_i),
         .rst_ni                     (rst_ni),
@@ -568,6 +677,8 @@ module issue_stage
         .wb_valid_i                 (wb_valid_o),
         .wb_rd_i                    (wbaddr_o),
         .wb_op_i                    (wb_op_o),
+        .is_result_available_gpr_i  (is_result_available_gpr_q),
+        .is_result_available_fpr_i  (is_result_available_fpr_q),
         .rollback_id_i              (rollback_id_o),
         .rollback_en_i              (rollback_we_i),
         .rollback_op_i              (rollback_op_i),
@@ -579,6 +690,7 @@ module issue_stage
         .commit_pointer_i           (rvfi_commit_pointer_o),
         .decoded_instr_trans_id_o   (decoded_instr_trans_id_o),
         .decoded_instr_global_id_o  (decoded_instr_global_id_o),
+        .decoded_instr_early_o      (rs_decoded_instr_early),
         .decoded_instr_valid_o      (decoded_instr_valid_o)
       );
       //TODO: puisque j'ai enlevé fu_ready qui causait des boucle combinatoire, on peut se retrouver
@@ -588,11 +700,13 @@ module issue_stage
       assign rs_valid[i] = decoded_instr_valid_o;
       assign rs_full[i] = rs_full_o & we_i;
       assign rs_global_id[i] = decoded_instr_global_id_o;
+      assign rs_early_data[i] = rs_decoded_instr_early;
     end else begin
       assign rs_trans_id[i] = '0;
       assign rs_valid[i] = '0;
       assign rs_full[i] = '0;
       assign rs_global_id[i] = '0;
+      assign rs_early_data[i] = '0;
     end
   end
 
@@ -625,6 +739,7 @@ module issue_stage
   logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_dispatch_instr_valid;
   logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] lsq_dispatch_instr_trans_id;
   logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] lsq_dispatch_instr_global_id;
+  decoded_instr_early_t [CVA6Cfg.NrIssuePorts-1:0]            lsq_early_data;
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0]                       lsq_dispatch_instr_data;
   logic [CVA6Cfg.NrIssuePorts-1:0]                            lsq_tournament_valid;
   logic [CVA6Cfg.NrIssuePorts-1:0]                            ld_token_valid, st_token_valid;
@@ -733,6 +848,7 @@ module issue_stage
     .NR_ENTRIES         (CVA6Cfg.NrLSQBypassEntries),
     .FALLTHROUGH        (1'b1),
     .scoreboard_entry_t (scoreboard_entry_t),
+    .decoded_instr_early_t (decoded_instr_early_t),
     .lsq_data_t (lsq_data_t)
   ) i_lsq_bypass (
     .clk_i                      (clk_i),
@@ -746,6 +862,8 @@ module issue_stage
     .wb_valid_i                 (wb_valid_o),
     .wb_rd_i                    (wbaddr_o),
     .wb_op_i                    (wb_op_o),
+    .is_result_available_gpr_i  (is_result_available_gpr_q),
+    .is_result_available_fpr_i  (is_result_available_fpr_q),
     .rollback_en_i              (rollback_we_i),
     .rollback_op_i              (rollback_op_i),
     .rollback_rd_i              (rollback_rd_i),
@@ -753,6 +871,7 @@ module issue_stage
     .dispatch_instr_fu_o        (lsq_dispatch_instr_fu),
     .dispatch_instr_trans_id_o  (lsq_dispatch_instr_trans_id),
     .dispatch_instr_global_id_o (lsq_dispatch_instr_global_id),
+    .decoded_instr_early_o      (lsq_early_data),
     .dispatch_instr_valid_o     (lsq_dispatch_instr_valid),
     .dispatch_instr_data_o      (lsq_dispatch_instr_data),
     .vaddr_trans_id_i           (vaddr_trans_id),
@@ -773,11 +892,13 @@ module issue_stage
   logic              [TOURNAMENT_SIZE-1:0][CVA6Cfg.GlobalRsIdWidth-1:0]    tournament_seq_num;
   logic              [TOURNAMENT_SIZE-1:0][$clog2(TOURNAMENT_SIZE)-1:0]    tournament_id;
   logic              [TOURNAMENT_SIZE-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]      tournament_candidates;
+  decoded_instr_early_t [TOURNAMENT_SIZE-1:0]                              tournament_data;
 
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] tree_lsq_data;
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] issue_lsq_data;
 
   assign tournament_candidates = {lsq_dispatch_instr_trans_id, rs_trans_id};
+  assign tournament_data = {lsq_early_data, rs_early_data};
 
   for (genvar i = 0 ; i < TOURNAMENT_SIZE ; i++) begin
     if (i < NR_WB) begin
@@ -821,33 +942,50 @@ module issue_stage
   end
 
 
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] issue_instr_merged;
+  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] issue_instr_sb;
+
+  always_comb begin : merge_instr_data
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      issue_instr_merged[i]         = issue_instr_sb[i];
+      issue_instr_merged[i].rs1     = tournament_data[winner[i]].rs1;
+      issue_instr_merged[i].rs2     = tournament_data[winner[i]].rs2;
+      issue_instr_merged[i].rd      = tournament_data[winner[i]].rd;
+      issue_instr_merged[i].fu      = tournament_data[winner[i]].fu;
+      issue_instr_merged[i].op      = tournament_data[winner[i]].op;
+      issue_instr_merged[i].use_imm = tournament_data[winner[i]].use_imm;
+      issue_instr_merged[i].global_rs_id = tournament_seq_num[winner[i]];
+      issue_instr_merged[i].trans_id     = tournament_candidates[winner[i]];
+    end
+  end
+
+
   //Finally we reorder instruction for 2 reasons
   //1. issue port 2 cannot execute CSR or CVXIF operations
   //2. CSR instruction forbids issuing 2 instuction at the same time
   // and it must be issued strictly in order
 
-  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0] issue_instr_sb;
-
   always_comb begin : issue_valid
 
     issue_lsq_data = '0;
-    issue_instr_sb_iro = '0;
+    issue_instr_sb_iro = issue_instr_sb;
+
     issue_instr_valid_sb_iro = '0;
 
-    if (issue_instr_sb[0].fu == CSR || issue_instr_sb[1].fu == CSR) begin
+    if (tournament_data[winner[0]].fu == CSR || tournament_data[winner[1]].fu == CSR) begin
       issue_instr_valid_sb_iro[0] = tree_valid[0];
       issue_instr_valid_sb_iro[1] = 1'b0;
-      issue_instr_sb_iro = issue_instr_sb;
+      issue_instr_sb_iro = issue_instr_merged;
       issue_lsq_data[0] = tree_lsq_data[0];
-    end else if (issue_instr_sb[1].fu == CVXIF) begin
-      issue_instr_sb_iro[0] = issue_instr_sb[1];
-      issue_instr_sb_iro[1] = issue_instr_sb[0];
+    end else if (tournament_data[winner[1]].fu == CVXIF) begin
+      issue_instr_sb_iro[0] = issue_instr_merged[1];
+      issue_instr_sb_iro[1] = issue_instr_merged[0];
       issue_instr_valid_sb_iro[0] = tree_valid[1];
       issue_instr_valid_sb_iro[1] = tree_valid[0];
       issue_lsq_data[0] = tree_lsq_data[1];
       issue_lsq_data[1] = tree_lsq_data[0];
     end else begin
-      issue_instr_sb_iro = issue_instr_sb;
+      issue_instr_sb_iro = issue_instr_merged;
       issue_instr_valid_sb_iro = tree_valid;
       issue_lsq_data = tree_lsq_data;
     end
@@ -870,11 +1008,9 @@ module issue_stage
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni || flush_i) begin
-      global_rs_id_q <= '0;
-    end else begin
-      global_rs_id_q <= global_rs_id_n;
-    end
+    if (!rst_ni)       global_rs_id_q <= '0;
+    else if (flush_i)  global_rs_id_q <= '0;
+    else               global_rs_id_q <= global_rs_id_n;
   end
 
 
@@ -1041,6 +1177,9 @@ module issue_stage
     assert property (@(posedge clk_i) disable iff (!rst_ni)
       tree_valid[i] |-> issue_instr_sb[i].global_rs_id == tournament_seq_num[winner[i]])
     else $error("SB et arbre incoherents, port %0d", i);
+
+    assert property (@(posedge clk_i) disable iff (!rst_ni) tree_valid[i] |-> issue_instr_merged[i] == issue_instr_sb[i])
+    else $error("instr_merged does not have correcte values");
   end
 
   assert property (@(posedge clk_i) disable iff (!rst_ni)
@@ -1052,6 +1191,7 @@ module issue_stage
 
   assert property (@(posedge clk_i) disable iff (!rst_ni) st_token_q <= CVA6Cfg.NrLSQEntries)
   else $error("st_token > NrLSQEntries");
+
 
   // =====================================================================
   //  Instrumentation performance (simulation uniquement)
