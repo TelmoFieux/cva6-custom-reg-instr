@@ -101,9 +101,9 @@ module register_allocation_table
       renamed_instr_o[i].arch_rd = decoded_instr_i[i].rd;
 
       // Renaming destination
-      if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
+      if (we_i[i] && decoded_instr_valid_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
         //check WAW hazard
-        if (i > 0 && we_i[i-1] && decoded_instr_ack_i[i-1] &&
+        if (i > 0 && we_i[i-1] && decoded_instr_valid_i[i-1] &&
             decoded_instr_i[i].rd == decoded_instr_i[i-1].rd) begin
             renamed_instr_o[i].old_phys = alloc_idx[i-1];
         end else begin

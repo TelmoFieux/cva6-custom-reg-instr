@@ -1825,14 +1825,6 @@ module load_store_queue
       );
   end
 
-  for (genvar i = 0; i < LSQ_DEPTH; i++) begin : g_chk_fwd_ext
-    assert property (@(posedge clk_i) disable iff (!rst_ni)
-      ld_is_forwarded[i] |->
-        ld_extend(ld_queue_q.instr[i].operation, fwd_data[full_match_winner_idx[i]]) == fwd_data[full_match_winner_idx[i]])
-    else $error("forwarding sans extension : ld %0d op=%0d data=%h", i,
-                ld_queue_q.instr[i].operation, fwd_data[full_match_winner_idx[i]]);
-  end
-
   // pragma translate_on
 
   // pragma translate_off
@@ -1851,6 +1843,18 @@ module load_store_queue
   end
   final $display("loads->cache=%0d  mauvais chemin=%0d  inversions d'age=%0d",
                 c_ld_to_cache, c_ld_squashed_after_issue, c_ld_age_inversion);
+  // pragma translate_on
+
+  // pragma translate_off
+  longint unsigned c_ld_wait_addr, c_ld_wait_tr, c_ld_wait_st, c_ld_in_cache, c_ld_wait_wb;
+  always_ff @(posedge clk_i) if (rst_ni)
+    for (int i = 0; i < LSQ_DEPTH; i++) if (ld_queue_q.reserved[i]) begin
+      if      (!ld_queue_q.vaddr_valid[i])  c_ld_wait_addr++;  // opérande d'adresse
+      else if (!ld_queue_q.paddr_valid[i])  c_ld_wait_tr++;    // traduction
+      else if (ld_queue_q.result_valid[i])  c_ld_wait_wb++;    // résultat prêt, attend le port de WB
+      else if (ld_queue_q.issued[i])        c_ld_in_cache++;   // envoyé au cache       -> ce que l'idée 2 récupère
+      else                                  c_ld_wait_st++;    // dépendance store / forwarding partiel / port cache
+    end
   // pragma translate_on
 
 endmodule

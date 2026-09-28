@@ -472,6 +472,8 @@ module issue_stage
   decoded_instr_early_t [NR_WB-1:0] rs_early_data;
   logic [NR_WB-1:0][CVA6Cfg.NrIssuePorts-1:0] rs_full;
   logic [NR_WB-1:0] rs_valid;
+  logic [NR_WB-1:0] rs_is_ft;
+  logic [NR_WB-1:0][$clog2(CVA6Cfg.NrIssuePorts)-1:0] rs_ft_src;
 
   logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] tree_results;
   logic [CVA6Cfg.NrIssuePorts-1:0] tree_valid;
@@ -597,33 +599,30 @@ module issue_stage
 
     rs_we = '0;
 
-    if(!rollback_en_o) begin
+    for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
+      if (decoded_instr_i[i].fu == ALU) begin
 
-      for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
-        if (decoded_instr_i[i].fu == ALU) begin
-
-          if (i == 0 || decoded_instr_i[0].fu != ALU) begin
-            rs_we[FPU_ALU2][i] = 1'b1;
-          end else begin
-            rs_we[FLU][i]      = 1'b1;
-          end
-        end
-
-        if (is_flu(decoded_instr_i[i].fu)) begin
-          rs_we[FLU][i] = 1'b1;
-        end
-
-        if (decoded_instr_i[i].fu == FPU | decoded_instr_i[i].fu == FPU_VEC) begin
+        if (i == 0 || decoded_instr_i[0].fu != ALU) begin
           rs_we[FPU_ALU2][i] = 1'b1;
+        end else begin
+          rs_we[FLU][i]      = 1'b1;
         end
-
-        if (CVA6Cfg.CvxifEn) begin
-          if (decoded_instr_i[i].fu == CVXIF) begin
-            rs_we[F_CVXIF][i] = 1'b1;
-          end
-        end
-
       end
+
+      if (is_flu(decoded_instr_i[i].fu)) begin
+        rs_we[FLU][i] = 1'b1;
+      end
+
+      if (decoded_instr_i[i].fu == FPU | decoded_instr_i[i].fu == FPU_VEC) begin
+        rs_we[FPU_ALU2][i] = 1'b1;
+      end
+
+      if (CVA6Cfg.CvxifEn) begin
+        if (decoded_instr_i[i].fu == CVXIF) begin
+          rs_we[F_CVXIF][i] = 1'b1;
+        end
+      end
+
     end
   end
 
@@ -643,6 +642,8 @@ module issue_stage
       logic [CVA6Cfg.TRANS_ID_BITS-1:0]   decoded_instr_trans_id_o;
       logic [CVA6Cfg.GlobalRsIdWidth-1:0] decoded_instr_global_id_o;
       logic                               decoded_instr_valid_o;
+      logic                               decoded_instr_is_ft_o;
+      logic [$clog2(CVA6Cfg.NrIssuePorts)-1:0]    decoded_instr_ft_src_o;
       logic [CVA6Cfg.NrIssuePorts-1:0]    rs_full_o;
       decoded_instr_early_t               rs_decoded_instr_early;
 
@@ -686,24 +687,30 @@ module issue_stage
         .rs_restore_en_i            (flush_i),
         .decoded_instr_i            (renamed_instr_i),
         .decoded_instr_valid_i      (decoded_instr_valid_i),
+        .decoded_instr_ready_i      (decoded_instr_ready),
         .decoded_instr_ack_i        (decoded_instr_ack_o),
         .commit_pointer_i           (rvfi_commit_pointer_o),
         .decoded_instr_trans_id_o   (decoded_instr_trans_id_o),
         .decoded_instr_global_id_o  (decoded_instr_global_id_o),
         .decoded_instr_early_o      (rs_decoded_instr_early),
-        .decoded_instr_valid_o      (decoded_instr_valid_o)
+        .decoded_instr_valid_o      (decoded_instr_valid_o),
+        .decoded_instr_is_ft_o      (decoded_instr_is_ft_o),
+        .decoded_instr_ft_src_o     (decoded_instr_ft_src_o)
       );
       //TODO: puisque j'ai enlevé fu_ready qui causait des boucle combinatoire, on peut se retrouver
       //à selectionner une op pour une unité occupé non ? Même si en soit je pense que c'est plus
       //trop un problème avec l'ajout de la lsq
       assign rs_trans_id[i] = decoded_instr_trans_id_o;
       assign rs_valid[i] = decoded_instr_valid_o;
+      assign rs_is_ft[i] = decoded_instr_is_ft_o;
+      assign rs_ft_src[i] = decoded_instr_ft_src_o;
       assign rs_full[i] = rs_full_o & we_i;
       assign rs_global_id[i] = decoded_instr_global_id_o;
       assign rs_early_data[i] = rs_decoded_instr_early;
     end else begin
       assign rs_trans_id[i] = '0;
       assign rs_valid[i] = '0;
+      assign rs_is_ft[i] = '0;
       assign rs_full[i] = '0;
       assign rs_global_id[i] = '0;
       assign rs_early_data[i] = '0;
@@ -893,12 +900,16 @@ module issue_stage
   logic              [TOURNAMENT_SIZE-1:0][$clog2(TOURNAMENT_SIZE)-1:0]    tournament_id;
   logic              [TOURNAMENT_SIZE-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]      tournament_candidates;
   decoded_instr_early_t [TOURNAMENT_SIZE-1:0]                              tournament_data;
+  logic              [TOURNAMENT_SIZE-1:0]                                 tournament_is_ft;
+  logic              [TOURNAMENT_SIZE-1:0][$clog2(CVA6Cfg.NrIssuePorts)-1:0]       tournament_ft_src;
 
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] tree_lsq_data;
   lsq_data_t [CVA6Cfg.NrIssuePorts-1:0] issue_lsq_data;
 
   assign tournament_candidates = {lsq_dispatch_instr_trans_id, rs_trans_id};
   assign tournament_data = {lsq_early_data, rs_early_data};
+  assign tournament_is_ft = {CVA6Cfg.NrIssuePorts'(0) ,rs_is_ft};
+  assign tournament_ft_src = {CVA6Cfg.NrCommitPorts'(0), rs_ft_src};
 
   for (genvar i = 0 ; i < TOURNAMENT_SIZE ; i++) begin
     if (i < NR_WB) begin
@@ -927,7 +938,14 @@ module issue_stage
 
   for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
     assign tree_results[i] = tournament_candidates[winner[i]];
-    assign tree_valid[i] = winner_valid[i] && !rollback_active_o;
+  end
+
+  always_comb begin
+    tree_valid = '0;
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      tree_valid[i] = winner_valid[i] && !rollback_active_o
+        && (!tournament_is_ft[winner[i]] || decoded_instr_ack_o[tournament_ft_src[winner[i]]]);
+    end
   end
 
 
@@ -1191,6 +1209,10 @@ module issue_stage
 
   assert property (@(posedge clk_i) disable iff (!rst_ni) st_token_q <= CVA6Cfg.NrLSQEntries)
   else $error("st_token > NrLSQEntries");
+
+  assert property (@(posedge clk_i) disable iff (!rst_ni)
+    rollback_en_o |-> !(|decoded_instr_ack_o))
+  else $error("ack pendant un rollback");
 
 
   // =====================================================================

@@ -75,7 +75,7 @@ package cva6_config_pkg;
   localparam CVA6ConfigGlobalRsIdWidth = 6;
   localparam CVA6ConfigRollbackWidth = 4;
   // same size for store and load queue
-  localparam CVA6ConfigNrLSQEntries = 4;
+  localparam CVA6ConfigNrLSQEntries = 8;
   localparam CVA6ConfigNrLSQBypassEntries = 4;
 
   localparam config_pkg::cva6_user_cfg_t cva6_cfg = '{

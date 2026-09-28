@@ -57,13 +57,16 @@ module reservation_station
 
     input  scoreboard_entry_t [CVA6Cfg.NrIssuePorts-1:0]                 decoded_instr_i,
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_valid_i,
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_ready_i,
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              decoded_instr_ack_i,
     input  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0]  commit_pointer_i,
 
     output logic [CVA6Cfg.TRANS_ID_BITS-1:0]                             decoded_instr_trans_id_o,
     output logic [CVA6Cfg.GlobalRsIdWidth-1:0]                           decoded_instr_global_id_o,
     output decoded_instr_early_t                                         decoded_instr_early_o,
-    output logic                                                         decoded_instr_valid_o //is instruction valid
+    output logic                                                         decoded_instr_valid_o, //is instruction valid
+    output logic                                                         decoded_instr_is_ft_o, // is it a fallthrough instruction ?
+    output logic [$clog2(CVA6Cfg.NrIssuePorts)-1:0]                              decoded_instr_ft_src_o
 
 );
 
@@ -90,6 +93,11 @@ module reservation_station
 
   reservation_station_t rs_n, rs_q;
 
+  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] RAW_updated_regs;
+  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] updated_regs;
+  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] forwarding_updated_regs;
+  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] speculative_updated_regs;
+
   logic [CVA6Cfg.NrIssuePorts:0][NR_RS_ENTRIES-1:0] free_entries_masked;
   logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
   logic [CVA6Cfg.NrIssuePorts-1:0][$clog2(NR_RS_ENTRIES):0] alloc_idx;
@@ -115,14 +123,53 @@ module reservation_station
 
   assign full_o = empty_mask;
 
+
+  logic [CVA6Cfg.NrIssuePorts-1:0][NR_READ_PORTS-1:0] fallthrough_valid_regs;
+  rs_entry_t [CVA6Cfg.NrIssuePorts-1:0] fallthrough_rs_entries;
+
+
+  if (FALLTHROUGH) begin
+    // only checking is_result_available and RAW dependencies
+
+    for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      assign fallthrough_rs_entries[i] = '{
+        global_rs_id: decoded_instr_i[i].global_rs_id,
+        trans_id: decoded_instr_i[i].trans_id,
+        fu: decoded_instr_i[i].fu,
+        op: decoded_instr_i[i].op,
+        rs1: decoded_instr_i[i].rs1,
+        rs2: decoded_instr_i[i].rs2,
+        rd: decoded_instr_i[i].rd,
+        result: decoded_instr_i[i].result,
+        use_imm: decoded_instr_i[i].use_imm,
+        ex_valid: decoded_instr_i[i].ex.valid
+        };
+    end
+
+    // ignoring write backs and speculative wakeup to avoid timing issues
+    always_comb begin
+      for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+        for (int r = 0; r < NR_READ_PORTS; r++) begin
+          automatic logic v;
+          v = updated_regs[alloc_idx[i]][r];
+          if (we_i[i] && decoded_instr_valid_i[i] && empty_mask[i] == 1'b0 && !RAW_updated_regs[alloc_idx[i]][r]) v = 1'b0;
+          fallthrough_valid_regs[i][r] = v;
+        end
+      end
+    end
+
+  end
+
+
   logic [NR_RS_ENTRIES-1:0] tournament_valid;
   logic [NR_RS_ENTRIES-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] tournament_seq_num;
   logic [NR_RS_ENTRIES-1:0][$clog2(NR_RS_ENTRIES)-1:0] tournament_id;
 
-  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] RAW_updated_regs;
-  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] updated_regs;
-  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] forwarding_updated_regs;
-  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] speculative_updated_regs;
+  logic [NR_RS_ENTRIES-1:0][NR_READ_PORTS-1:0] tournament_valid_regs;
+  rs_entry_t [NR_RS_ENTRIES-1:0] tournament_candidates;
+
+  assign tournament_candidates = rs_q.rs_table;
+  assign tournament_valid_regs = rs_q.valid_regs;
 
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
     assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ?
@@ -146,25 +193,53 @@ module reservation_station
       .winner_valid_o (winner_valid_o)
   );
 
+  logic rs_sel_valid;
+  rs_entry_t sel;
+
   if (CSR_EN) begin
     //only send csr to execution if all other instruction finished execution
-    assign decoded_instr_valid_o = rs_q.rs_table[winner_o].fu == CSR ?
-        (winner_valid_o && rs_q.valid_regs[winner_o] == '1 && rs_q.rs_table[winner_o].trans_id == commit_pointer_i[0])
+    assign rs_sel_valid = tournament_candidates[winner_o].fu == CSR ?
+        (winner_valid_o && tournament_valid_regs[winner_o] == '1 && tournament_candidates[winner_o].trans_id == commit_pointer_i[0])
       : winner_valid_o;
   end else begin
-    assign decoded_instr_valid_o = winner_valid_o;
+    assign rs_sel_valid = winner_valid_o;
   end
 
-  assign decoded_instr_trans_id_o = rs_q.rs_table[winner_o].trans_id;
-  assign decoded_instr_global_id_o = rs_q.rs_table[winner_o].global_rs_id;
+  logic [CVA6Cfg.NrIssuePorts-1:0] fallthrough_valid;
+  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++)
+    assign fallthrough_valid[i] = we_i[i] && decoded_instr_valid_i[i] && !empty_mask[i]
+                      && fallthrough_valid_regs[i] == '1 && decoded_instr_i[i].fu != CSR;
+
+  assign decoded_instr_valid_o = rs_sel_valid | (|fallthrough_valid);
+
+  always_comb begin
+
+    decoded_instr_is_ft_o = 1'b0;
+    decoded_instr_ft_src_o = 1'b0;
+
+    if (rs_sel_valid) begin
+      sel = rs_q.rs_table[winner_o];
+    end else if (fallthrough_valid[0]) begin
+      sel = fallthrough_rs_entries[0];
+      decoded_instr_is_ft_o = 1'b1;
+      decoded_instr_ft_src_o = 1'b0;
+    end else begin
+      decoded_instr_is_ft_o = fallthrough_valid[1];
+      sel = fallthrough_rs_entries[1];
+      decoded_instr_ft_src_o = 1'b1;
+    end
+  end
+
+  assign decoded_instr_trans_id_o = sel.trans_id;
+  assign decoded_instr_global_id_o = sel.global_rs_id;
 
   assign decoded_instr_early_o = '{
-    rs1:     rs_q.rs_table[winner_o].rs1,
-    rs2:     rs_q.rs_table[winner_o].rs2,
-    rd:      rs_q.rs_table[winner_o].rd,
-    fu:      rs_q.rs_table[winner_o].fu,
-    op:      rs_q.rs_table[winner_o].op,
-    use_imm: rs_q.rs_table[winner_o].use_imm
+    rs1:     sel.rs1,
+    rs2:     sel.rs2,
+    rd:      sel.rd,
+    fu:      sel.fu,
+    op:      sel.op,
+    use_imm: sel.use_imm
   };
 
 
@@ -174,22 +249,20 @@ module reservation_station
     rs_n = rs_q;
 
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-      if (decoded_instr_ack_i[i]) begin
-        if (we_i[i] && empty_mask[i] == 1'b0) begin
-          rs_n.rs_table[alloc_idx[i]] =
-            {
-            decoded_instr_i[i].global_rs_id,
-            decoded_instr_i[i].trans_id,
-            decoded_instr_i[i].fu,
-            decoded_instr_i[i].op,
-            decoded_instr_i[i].rs1,
-            decoded_instr_i[i].rs2,
-            decoded_instr_i[i].rd,
-            decoded_instr_i[i].result,
-            decoded_instr_i[i].use_imm,
-            decoded_instr_i[i].ex.valid
-            };
-        end
+      if (we_i[i] && empty_mask[i] == 1'b0) begin
+        rs_n.rs_table[alloc_idx[i]] =
+          {
+          decoded_instr_i[i].global_rs_id,
+          decoded_instr_i[i].trans_id,
+          decoded_instr_i[i].fu,
+          decoded_instr_i[i].op,
+          decoded_instr_i[i].rs1,
+          decoded_instr_i[i].rs2,
+          decoded_instr_i[i].rd,
+          decoded_instr_i[i].result,
+          decoded_instr_i[i].use_imm,
+          decoded_instr_i[i].ex.valid
+          };
       end
     end
 
@@ -205,11 +278,25 @@ module reservation_station
       end
     end
 
+    if (FALLTHROUGH) begin
+      for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+        if (we_i[i] && decoded_instr_ack_i[i] && !empty_mask[i]) begin
+          for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+            //fallthrough happened
+            if (rm_i[j] && rm_id_i[j] == decoded_instr_i[i].global_rs_id) begin
+              rs_n.free_entries[alloc_idx[i]] = 1'b1;
+            end
+          end
+        end
+      end
+    end
+
+
     //removing instr after it was selected to be executed
     //or because of rollback triggered exception or branch miss.
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
-      allocated_by_p0 = (CVA6Cfg.NrIssuePorts > 0) && (i == alloc_idx[0]) && we_i[0] && decoded_instr_ack_i[0] && empty_mask[0] == 1'b0;
-      allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_ack_i[1] && empty_mask[1] == 1'b0;
+      allocated_by_p0 = (CVA6Cfg.NrIssuePorts > 0) && (i == alloc_idx[0]) && we_i[0] && decoded_instr_valid_i[0] && empty_mask[0] == 1'b0;
+      allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_valid_i[1] && empty_mask[1] == 1'b0;
 
       for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
         // instr has been dispatched
@@ -227,7 +314,7 @@ module reservation_station
 
 
       //First we check RAW hazard between the 2 newly fetched instr
-      if (decoded_instr_ack_i == '1) begin
+      if (decoded_instr_valid_i == '1) begin
         if (!FPR_ENABLED) begin
           RAW_updated_regs[i][0] = (decoded_instr_i[1].rs1 == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
           RAW_updated_regs[i][1] = (decoded_instr_i[1].rs2 == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
@@ -413,44 +500,16 @@ module reservation_station
         end
       end
 
-
       //In the end we select the right calculated value for valid_regs
       //First we check select RAW result if valid then speculative results, then forwarding result and finally default result
       if (!rs_restore_en_i) begin
-        if (allocated_by_p1) begin
-          rs_n.valid_regs[i][0] = RAW_updated_regs[i][0] == 1'b1 ?
-            (speculative_updated_regs[i][0] == 1'b0 ?
-              (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0])
-            : speculative_updated_regs[i][0])
-          : RAW_updated_regs[i][0];
-          rs_n.valid_regs[i][1] = RAW_updated_regs[i][1] == 1'b1 ?
-            (speculative_updated_regs[i][1] == 1'b0 ?
-              (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1])
-            : speculative_updated_regs[i][1])
-          : RAW_updated_regs[i][1];
-          if (NR_READ_PORTS == 3)
-            rs_n.valid_regs[i][2] = RAW_updated_regs[i][2] == 1'b1 ?
-              (speculative_updated_regs[i][2] == 1'b0 ?
-                (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2])
-              : speculative_updated_regs[i][2])
-            : RAW_updated_regs[i][2];
-        end else begin
-          rs_n.valid_regs[i][0] = speculative_updated_regs[i][0] == 1'b0 ?
-            (forwarding_updated_regs[i][0] == 1'b0 ? updated_regs[i][0] : forwarding_updated_regs[i][0])
-          : speculative_updated_regs[i][0];
-          rs_n.valid_regs[i][1] = speculative_updated_regs[i][1] == 1'b0 ?
-            (forwarding_updated_regs[i][1] == 1'b0 ? updated_regs[i][1] : forwarding_updated_regs[i][1])
-          : speculative_updated_regs[i][1];
-          if (NR_READ_PORTS == 3)
-            rs_n.valid_regs[i][2] = speculative_updated_regs[i][2] == 1'b0 ?
-              (forwarding_updated_regs[i][2] == 1'b0 ? updated_regs[i][2] : forwarding_updated_regs[i][2])
-            : speculative_updated_regs[i][2];
+        for (int r = 0; r < NR_READ_PORTS; r++) begin
+          automatic logic v;
+          v = speculative_updated_regs[i][r] ? 1'b1 :
+              forwarding_updated_regs[i][r]  ? 1'b1 : updated_regs[i][r];
+          if (allocated_by_p1 && !RAW_updated_regs[i][r]) v = 1'b0;
+          rs_n.valid_regs[i][r] = v;
         end
-      end else begin
-        rs_n.valid_regs[i][0] = updated_regs[i][0];
-        rs_n.valid_regs[i][1] = updated_regs[i][1];
-        if (NR_READ_PORTS == 3)
-          rs_n.valid_regs[i][2] = updated_regs[i][2];
       end
 
       //ultimately we check immediate state
@@ -508,6 +567,10 @@ module reservation_station
       perf_ft[j]    = perf_alloc[j] && (rs_n.valid_regs[alloc_idx[j]] == '1) && !decoded_instr_valid_o;
     end
   end
+
+  assert property (@(posedge clk_i) disable iff (!rst_ni) !$isunknown({winner_valid_o, winner_o}))
+  else $error("tournoi RS : X en sortie");
+
   // pragma translate_on
 
 endmodule
