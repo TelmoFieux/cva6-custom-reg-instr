@@ -1828,26 +1828,30 @@ module load_store_queue
   // pragma translate_on
 
   // pragma translate_off
-  int unsigned c_ld_to_cache, c_ld_squashed_after_issue, c_ld_age_inversion;
-  always_ff @(posedge clk_i) if (rst_ni) begin
+  int unsigned c_ld_to_cache, c_ld_squashed_after_issue, c_ld_age_inversion, c_st_drained;
+  always_ff @(posedge clk_i) if (rst_ni && OoO_perf_pkg::window) begin
     if (ld_unit_valid_o && !ldbuf_full_i) c_ld_to_cache <= c_ld_to_cache + 1;
     // loads déjà envoyés au cache puis rollbackés : trafic du mauvais chemin
-    for (int i = 0; i < LSQ_DEPTH; i++)
-      for (int j = 0; j < CVA6Cfg.RollbackWidth; j++)
+
+    if (st_sent_to_cache_i) c_st_drained++;
+
+    for (int i = 0; i < LSQ_DEPTH; i++) begin
+
+      for (int j = 0; j < CVA6Cfg.RollbackWidth; j++) begin
         if (rollback_i[j] && ld_queue_q.reserved[i] && ld_queue_q.issued[i] &&
             ld_queue_q.instr[i].trans_id == rollback_trans_id_i[j])
           c_ld_squashed_after_issue <= c_ld_squashed_after_issue + 1;
+      end
+    end
     // un load plus ancien était prêt mais un plus jeune a été choisi
     if (ld_unit_valid_o && |(age_matrix_q[ld_selected_pointer][LSQ_DEPTH-1:0] & ld_unit_ready))
       c_ld_age_inversion <= c_ld_age_inversion + 1;
   end
   final $display("loads->cache=%0d  mauvais chemin=%0d  inversions d'age=%0d",
                 c_ld_to_cache, c_ld_squashed_after_issue, c_ld_age_inversion);
-  // pragma translate_on
 
-  // pragma translate_off
   longint unsigned c_ld_wait_addr, c_ld_wait_tr, c_ld_wait_st, c_ld_in_cache, c_ld_wait_wb;
-  always_ff @(posedge clk_i) if (rst_ni)
+  always_ff @(posedge clk_i) if (rst_ni && OoO_perf_pkg::window)
     for (int i = 0; i < LSQ_DEPTH; i++) if (ld_queue_q.reserved[i]) begin
       if      (!ld_queue_q.vaddr_valid[i])  c_ld_wait_addr++;  // opérande d'adresse
       else if (!ld_queue_q.paddr_valid[i])  c_ld_wait_tr++;    // traduction
@@ -1855,6 +1859,53 @@ module load_store_queue
       else if (ld_queue_q.issued[i])        c_ld_in_cache++;   // envoyé au cache       -> ce que l'idée 2 récupère
       else                                  c_ld_wait_st++;    // dépendance store / forwarding partiel / port cache
     end
+  final $display("loads en attente de vaddr=%0d load en attente de traduction=%0d load en attente de write back=%0d load envoyé au cache mais toujours dans lsq=%0d load attend un store = %0d",
+                c_ld_wait_addr, c_ld_wait_tr, c_ld_wait_st, c_ld_in_cache, c_ld_wait_wb);
+
+  longint unsigned c_st_addr, c_st_data, c_st_wait_commit, c_st_committed;
+  always_ff @(posedge clk_i) if (rst_ni && OoO_perf_pkg::window)
+    for (int i = 0; i < LSQ_DEPTH; i++) if (st_queue_q.reserved[i]) begin
+      if      (st_queue_q.committed[i])    c_st_committed++;    // commité, attend l'envoi au cache
+      else if (!st_queue_q.paddr_valid[i]) c_st_addr++;         // adresse / traduction
+      else if (!st_queue_q.data_valid[i])  c_st_data++;         // attend sa donnée
+      else                                 c_st_wait_commit++;  // prêt, attend son tour au commit
+    end
+  final $display("st: addr=%0d data=%0d attente_commit=%0d commite_non_draine=%0d st_drained=%0d",
+                c_st_addr, c_st_data, c_st_wait_commit, c_st_committed, c_st_drained);
+  // pragma translate_on
+
+  // pragma translate_off
+  longint unsigned c_fwd_total, c_fwd_from_committed;
+  always_ff @(posedge clk_i) if (rst_ni && OoO_perf_pkg::window)
+    for (int i = 0; i < LSQ_DEPTH; i++) if (ld_is_forwarded[i]) begin
+      c_fwd_total++;
+      if (st_queue_q.committed[full_match_winner_idx[i]]) c_fwd_from_committed++;
+    end
+
+  final $display("forward from committed store=%0d store-to-load forwarding =%0d",
+                c_fwd_from_committed, c_fwd_total);
+  // pragma translate_on
+
+  // pragma translate_off
+  longint unsigned c_lw, c_lh, c_lb, c_ld_partial_wait;
+  always_ff @(posedge clk_i) if (rst_ni && OoO_perf_pkg::window) begin
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) if (ld_we_i[i] && !ld_full[i])
+      unique case (decoded_req[i].operation)
+        LW:                       c_lw++;
+        LH, LHU:                  c_lh++;
+        LB, LBU:                  c_lb++;
+        default: ;
+      endcase
+    // loads bloqués par une correspondance PARTIELLE avec un store plus ancien (ce que le forwarding octet par octet résoudrait)
+    for (int i = 0; i < LSQ_DEPTH; i++)
+      if (ld_queue_q.reserved[i] && !ld_queue_q.result_valid[i] && !ld_queue_q.issued[i] &&
+          comb_ld_paddr_valid[i] && !partial_no_match[i])
+        c_ld_partial_wait++;
+  end
+
+  final $display("number of lb =%0d number of lh =%0d number of lw=%0d number of potential partial forwading=%0d",
+                c_lb, c_lh, c_lw, c_ld_partial_wait);
+
   // pragma translate_on
 
 endmodule

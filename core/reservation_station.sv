@@ -40,6 +40,7 @@ module reservation_station
     input  logic                                                         rst_ni,
     output logic [CVA6Cfg.NrIssuePorts-1:0]                              full_o, // is rs full
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              we_i,
+    input  logic [CVA6Cfg.NrIssuePorts-1:0]                              mult_valid_i,
     input  logic [CVA6Cfg.NrIssuePorts-1:0]                              rm_i, // do we remove the entry
     input  logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.GlobalRsIdWidth-1:0] rm_id_i, // id of the entry to remove
     input  fu_op [CVA6Cfg.NrIssuePorts-1:0]                              rm_op_i, // op of the entry to remove
@@ -66,11 +67,15 @@ module reservation_station
     output decoded_instr_early_t                                         decoded_instr_early_o,
     output logic                                                         decoded_instr_valid_o, //is instruction valid
     output logic                                                         decoded_instr_is_ft_o, // is it a fallthrough instruction ?
-    output logic [$clog2(CVA6Cfg.NrIssuePorts)-1:0]                              decoded_instr_ft_src_o
+    output logic [$clog2(CVA6Cfg.NrIssuePorts)-1:0]                      decoded_instr_ft_src_o
 
 );
 
   localparam NUM_REG = CVA6Cfg.NrPhysReg;
+
+  function automatic logic fu_blocked(fu_t fu);
+    return |mult_valid_i && (fu inside {CTRL_FLOW, CSR} || (fu == ALU && !CVA6Cfg.SuperscalarEn));
+  endfunction
 
   typedef struct packed {
     logic [CVA6Cfg.GlobalRsIdWidth-1:0] global_rs_id;
@@ -158,6 +163,9 @@ module reservation_station
       end
     end
 
+  end else begin
+    assign fallthrough_rs_entries = '0;
+    assign fallthrough_valid_regs = '0;
   end
 
 
@@ -172,9 +180,9 @@ module reservation_station
   assign tournament_valid_regs = rs_q.valid_regs;
 
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
-    assign tournament_valid[i] = rs_q.free_entries[i] == 1'b0 ?
-      (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR ? 1'b1 : 1'b0)
-    : 1'b0;
+    assign tournament_valid[i] = !rs_q.free_entries[i] &&
+      (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR)
+      && !fu_blocked(rs_q.rs_table[i].fu);
     assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
     assign tournament_id[i] = i;
   end
@@ -206,9 +214,14 @@ module reservation_station
   end
 
   logic [CVA6Cfg.NrIssuePorts-1:0] fallthrough_valid;
-  for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++)
-    assign fallthrough_valid[i] = we_i[i] && decoded_instr_valid_i[i] && !empty_mask[i]
-                      && fallthrough_valid_regs[i] == '1 && decoded_instr_i[i].fu != CSR;
+
+  if (FALLTHROUGH) begin
+    for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++)
+      assign fallthrough_valid[i] = we_i[i] && decoded_instr_valid_i[i] && !empty_mask[i]
+                        && fallthrough_valid_regs[i] == '1 && decoded_instr_i[i].fu != CSR && !fu_blocked(decoded_instr_i[i].fu);;
+  end else begin
+    assign fallthrough_valid = '0;
+  end
 
   assign decoded_instr_valid_o = rs_sel_valid | (|fallthrough_valid);
 
@@ -219,14 +232,16 @@ module reservation_station
 
     if (rs_sel_valid) begin
       sel = rs_q.rs_table[winner_o];
-    end else if (fallthrough_valid[0]) begin
-      sel = fallthrough_rs_entries[0];
-      decoded_instr_is_ft_o = 1'b1;
-      decoded_instr_ft_src_o = 1'b0;
     end else begin
-      decoded_instr_is_ft_o = fallthrough_valid[1];
-      sel = fallthrough_rs_entries[1];
-      decoded_instr_ft_src_o = 1'b1;
+      sel = fallthrough_rs_entries[0];
+      decoded_instr_is_ft_o  = fallthrough_valid[0];
+      decoded_instr_ft_src_o = '0;
+      for (int unsigned i = 1; i < CVA6Cfg.NrIssuePorts; i++)
+        if (!fallthrough_valid[0] && fallthrough_valid[i]) begin
+          sel = fallthrough_rs_entries[i];
+          decoded_instr_is_ft_o  = 1'b1;
+          decoded_instr_ft_src_o = i;
+        end
     end
   end
 
@@ -244,8 +259,8 @@ module reservation_station
 
 
   always_comb begin : updating_rs
-    logic allocated_by_p0;
-    logic allocated_by_p1;
+    logic [CVA6Cfg.NrIssuePorts-1:0] allocated;
+
     rs_n = rs_q;
 
     for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
@@ -295,8 +310,10 @@ module reservation_station
     //removing instr after it was selected to be executed
     //or because of rollback triggered exception or branch miss.
     for (int i = 0; i < NR_RS_ENTRIES; i++) begin
-      allocated_by_p0 = (CVA6Cfg.NrIssuePorts > 0) && (i == alloc_idx[0]) && we_i[0] && decoded_instr_valid_i[0] && empty_mask[0] == 1'b0;
-      allocated_by_p1 = (CVA6Cfg.NrIssuePorts > 1) && (i == alloc_idx[1]) && we_i[1] && decoded_instr_valid_i[1] && empty_mask[1] == 1'b0;
+
+      for (int unsigned j = 0 ; j < CVA6Cfg.NrIssuePorts ; j++ ) begin
+        allocated[j] = (i == alloc_idx[j]) && we_i[j] && decoded_instr_valid_i[j] && empty_mask[j] == 1'b0;
+      end
 
       for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
         // instr has been dispatched
@@ -312,41 +329,42 @@ module reservation_station
         end
       end
 
-
+      RAW_updated_regs[i] = '1;
       //First we check RAW hazard between the 2 newly fetched instr
-      if (decoded_instr_valid_i == '1) begin
-        if (!FPR_ENABLED) begin
-          RAW_updated_regs[i][0] = (decoded_instr_i[1].rs1 == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
-          RAW_updated_regs[i][1] = (decoded_instr_i[1].rs2 == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
-          if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-            RAW_updated_regs[i][2] = (decoded_instr_i[1].result == decoded_instr_i[0].rd && decoded_instr_i[0].rd != '0) ? 1'b0 : 1'b1;
-          end
-        end else begin
-          RAW_updated_regs[i][0] = is_rd_fpr(decoded_instr_i[0].op) && is_rs1_fpr(decoded_instr_i[1].op) && decoded_instr_i[1].rs1 == decoded_instr_i[0].rd ? 1'b0 : 1'b1;
-          RAW_updated_regs[i][1] = is_rd_fpr(decoded_instr_i[0].op) && is_rs2_fpr(decoded_instr_i[1].op) && decoded_instr_i[1].rs2 == decoded_instr_i[0].rd ? 1'b0 : 1'b1;
-          if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-            RAW_updated_regs[i][2] = is_rd_fpr(decoded_instr_i[0].op) && is_imm_fpr(decoded_instr_i[1].op) && decoded_instr_i[1].result == decoded_instr_i[0].rd ? 1'b0 : 1'b1;
+      for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+        if (allocated[j]) begin
+          for (int k = 0; k <j ; k++) begin
+            if (!FPR_ENABLED) begin
+              if (decoded_instr_i[j].rs1 == decoded_instr_i[k].rd && decoded_instr_i[k].rd != '0) RAW_updated_regs[i][0] = 1'b0;
+              if (decoded_instr_i[j].rs2 == decoded_instr_i[k].rd && decoded_instr_i[k].rd != '0) RAW_updated_regs[i][1] = 1'b0;
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                if (decoded_instr_i[j].result == decoded_instr_i[k].rd && decoded_instr_i[k].rd != '0) RAW_updated_regs[i][2] = 1'b0;
+              end
+            end else begin
+              if (is_rd_fpr(decoded_instr_i[k].op) && is_rs1_fpr(decoded_instr_i[j].op) && decoded_instr_i[j].rs1 == decoded_instr_i[k].rd) RAW_updated_regs[i][0] = 1'b0;
+              if (is_rd_fpr(decoded_instr_i[k].op) && is_rs2_fpr(decoded_instr_i[j].op) && decoded_instr_i[j].rs2 == decoded_instr_i[k].rd) RAW_updated_regs[i][1] = 1'b0;
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                if (is_rd_fpr(decoded_instr_i[k].op) && is_imm_fpr(decoded_instr_i[j].op) && decoded_instr_i[j].result == decoded_instr_i[k].rd) RAW_updated_regs[i][2] = 1'b0;
+              end
+            end
           end
         end
-      end else begin
-        RAW_updated_regs[i] = '1;
       end
+
 
       // speculative wakeup
       for (int k = 0; k < CVA6Cfg.NrIssuePorts; k++) begin
         if (rm_i[k] && instr_cycle_count(rm_op_i[k]) == 1'b1) begin
           if (!FPR_ENABLED) begin
-            if (allocated_by_p0) begin
-              if (rm_rd_i[k] == decoded_instr_i[0].rs1) speculative_updated_regs[i][0] = 1'b1;
-              if (rm_rd_i[k] == decoded_instr_i[0].rs2) speculative_updated_regs[i][1] = 1'b1;
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm) begin
-                if (rm_rd_i[k] == decoded_instr_i[0].result) speculative_updated_regs[i][2] = 1'b1;
-              end
-            end else if (allocated_by_p1) begin
-              if (rm_rd_i[k] == decoded_instr_i[1].rs1) speculative_updated_regs[i][0] = 1'b1;
-              if (rm_rd_i[k] == decoded_instr_i[1].rs2) speculative_updated_regs[i][1] = 1'b1;
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-                if (rm_rd_i[k] == decoded_instr_i[1].result) speculative_updated_regs[i][2] = 1'b1;
+            if (|allocated) begin
+              for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+                if (allocated[j]) begin
+                  if (rm_rd_i[k] == decoded_instr_i[j].rs1) speculative_updated_regs[i][0] = 1'b1;
+                  if (rm_rd_i[k] == decoded_instr_i[j].rs2) speculative_updated_regs[i][1] = 1'b1;
+                  if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                    if (rm_rd_i[k] == decoded_instr_i[j].result) speculative_updated_regs[i][2] = 1'b1;
+                  end
+                end
               end
             end else begin
               if (rm_rd_i[k] == rs_q.rs_table[i].rs1) speculative_updated_regs[i][0] = 1'b1;
@@ -356,28 +374,20 @@ module reservation_station
               end
             end
           end else begin
-            if (allocated_by_p0) begin
-              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[0].op)) begin
-                if (rm_rd_i[k] == decoded_instr_i[0].rs1) speculative_updated_regs[i][0] = 1'b1;
-              end
-              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[0].op)) begin
-                if (rm_rd_i[k] == decoded_instr_i[0].rs2) speculative_updated_regs[i][1] = 1'b1;
-              end
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm) begin
-                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[0].op)) begin
-                  if (rm_rd_i[k] == decoded_instr_i[0].result) speculative_updated_regs[i][2] = 1'b1;
-                end
-              end
-            end else if (allocated_by_p1) begin
-              if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[1].op)) begin
-                if (rm_rd_i[k] == decoded_instr_i[1].rs1) speculative_updated_regs[i][0] = 1'b1;
-              end
-              if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[1].op)) begin
-                if (rm_rd_i[k] == decoded_instr_i[1].rs2) speculative_updated_regs[i][1] = 1'b1;
-              end
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-                if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[1].op)) begin
-                  if (rm_rd_i[k] == decoded_instr_i[1].result) speculative_updated_regs[i][2] = 1'b1;
+            if (|allocated) begin
+              for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+                if (allocated[j]) begin
+                  if (is_rd_fpr(rm_op_i[k]) == is_rs1_fpr(decoded_instr_i[j].op)) begin
+                    if (rm_rd_i[k] == decoded_instr_i[j].rs1) speculative_updated_regs[i][0] = 1'b1;
+                  end
+                  if (is_rd_fpr(rm_op_i[k]) == is_rs2_fpr(decoded_instr_i[j].op)) begin
+                    if (rm_rd_i[k] == decoded_instr_i[j].rs2) speculative_updated_regs[i][1] = 1'b1;
+                  end
+                  if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                    if (is_rd_fpr(rm_op_i[k]) == is_imm_fpr(decoded_instr_i[j].op)) begin
+                      if (rm_rd_i[k] == decoded_instr_i[j].result) speculative_updated_regs[i][2] = 1'b1;
+                    end
+                  end
                 end
               end
             end else begin
@@ -399,20 +409,19 @@ module reservation_station
 
       //Then we update based on the retired instr that finished executing
       //because otherwise dependencies would take 1 cycle to update
+
       for (int k = 0; k < CVA6Cfg.NrWbPorts; k++) begin
         if (wb_valid_i[k]) begin
           if (!FPR_ENABLED) begin
-            if (allocated_by_p0) begin
-              if (wb_rd_i[k] == decoded_instr_i[0].rs1) forwarding_updated_regs[i][0] = 1'b1;
-              if (wb_rd_i[k] == decoded_instr_i[0].rs2) forwarding_updated_regs[i][1] = 1'b1;
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm) begin
-                if (wb_rd_i[k] == decoded_instr_i[0].result) forwarding_updated_regs[i][2] = 1'b1;
-              end
-            end else if (allocated_by_p1) begin
-              if (wb_rd_i[k] == decoded_instr_i[1].rs1) forwarding_updated_regs[i][0] = 1'b1;
-              if (wb_rd_i[k] == decoded_instr_i[1].rs2) forwarding_updated_regs[i][1] = 1'b1;
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-                if (wb_rd_i[k] == decoded_instr_i[1].result) forwarding_updated_regs[i][2] = 1'b1;
+            if (|allocated) begin
+              for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+                if (allocated[j]) begin
+                  if (wb_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                  if (wb_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                  if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                    if (wb_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
+                  end
+                end
               end
             end else begin
               if (wb_rd_i[k] == rs_q.rs_table[i].rs1) forwarding_updated_regs[i][0] = 1'b1;
@@ -422,28 +431,20 @@ module reservation_station
               end
             end
           end else begin
-            if (allocated_by_p0) begin
-              if (is_rd_fpr(wb_op_i[k]) == is_rs1_fpr(decoded_instr_i[0].op)) begin
-                if (wb_rd_i[k] == decoded_instr_i[0].rs1) forwarding_updated_regs[i][0] = 1'b1;
-              end
-              if (is_rd_fpr(wb_op_i[k]) == is_rs2_fpr(decoded_instr_i[0].op)) begin
-                if (wb_rd_i[k] == decoded_instr_i[0].rs2) forwarding_updated_regs[i][1] = 1'b1;
-              end
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm) begin
-                if (is_rd_fpr(wb_op_i[k]) == is_imm_fpr(decoded_instr_i[0].op)) begin
-                  if (wb_rd_i[k] == decoded_instr_i[0].result) forwarding_updated_regs[i][2] = 1'b1;
-                end
-              end
-            end else if (allocated_by_p1) begin
-              if (is_rd_fpr(wb_op_i[k]) == is_rs1_fpr(decoded_instr_i[1].op)) begin
-                if (wb_rd_i[k] == decoded_instr_i[1].rs1) forwarding_updated_regs[i][0] = 1'b1;
-              end
-              if (is_rd_fpr(wb_op_i[k]) == is_rs2_fpr(decoded_instr_i[1].op)) begin
-                if (wb_rd_i[k] == decoded_instr_i[1].rs2) forwarding_updated_regs[i][1] = 1'b1;
-              end
-              if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm) begin
-                if (is_rd_fpr(wb_op_i[k]) == is_imm_fpr(decoded_instr_i[1].op)) begin
-                  if (wb_rd_i[k] == decoded_instr_i[1].result) forwarding_updated_regs[i][2] = 1'b1;
+            if (|allocated) begin
+              for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+                if (allocated[j]) begin
+                  if (is_rd_fpr(wb_op_i[k]) == is_rs1_fpr(decoded_instr_i[j].op)) begin
+                    if (wb_rd_i[k] == decoded_instr_i[j].rs1) forwarding_updated_regs[i][0] = 1'b1;
+                  end
+                  if (is_rd_fpr(wb_op_i[k]) == is_rs2_fpr(decoded_instr_i[j].op)) begin
+                    if (wb_rd_i[k] == decoded_instr_i[j].rs2) forwarding_updated_regs[i][1] = 1'b1;
+                  end
+                  if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm) begin
+                    if (is_rd_fpr(wb_op_i[k]) == is_imm_fpr(decoded_instr_i[j].op)) begin
+                      if (wb_rd_i[k] == decoded_instr_i[j].result) forwarding_updated_regs[i][2] = 1'b1;
+                    end
+                  end
                 end
               end
             end else begin
@@ -465,16 +466,15 @@ module reservation_station
 
       //Finally we define the default behavior
       if (!FPR_ENABLED) begin
-        if (allocated_by_p0) begin
-          updated_regs[i][0] = is_result_available_gpr_i[decoded_instr_i[0].rs1];
-          updated_regs[i][1] = is_result_available_gpr_i[decoded_instr_i[0].rs2];
-          if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm)
-            updated_regs[i][2] = is_result_available_gpr_i[decoded_instr_i[0].result];
-        end else if (allocated_by_p1) begin
-          updated_regs[i][0] = is_result_available_gpr_i[decoded_instr_i[1].rs1];
-          updated_regs[i][1] = is_result_available_gpr_i[decoded_instr_i[1].rs2];
-          if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm)
-            updated_regs[i][2] = is_result_available_gpr_i[decoded_instr_i[1].result];
+        if (|allocated) begin
+          for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+            if (allocated[j]) begin
+              updated_regs[i][0] = is_result_available_gpr_i[decoded_instr_i[j].rs1];
+              updated_regs[i][1] = is_result_available_gpr_i[decoded_instr_i[j].rs2];
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
+                updated_regs[i][2] = is_result_available_gpr_i[decoded_instr_i[j].result];
+            end
+          end
         end else begin
           updated_regs[i][0] = rs_q.valid_regs[i][0];
           updated_regs[i][1] = rs_q.valid_regs[i][1];
@@ -482,16 +482,15 @@ module reservation_station
             updated_regs[i][2] = rs_q.valid_regs[i][2];
         end
       end else begin
-        if (allocated_by_p0) begin
-          updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_i[decoded_instr_i[0].rs1] : is_result_available_gpr_i[decoded_instr_i[0].rs1];
-          updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_i[decoded_instr_i[0].rs2] : is_result_available_gpr_i[decoded_instr_i[0].rs2];
-          if (NR_READ_PORTS == 3 && !decoded_instr_i[0].use_imm)
-            updated_regs[i][2] = is_imm_fpr(decoded_instr_i[0].op) ? is_result_available_fpr_i[decoded_instr_i[0].result] : is_result_available_gpr_i[decoded_instr_i[0].result];
-        end else if (allocated_by_p1) begin
-          updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_i[decoded_instr_i[1].rs1] : is_result_available_gpr_i[decoded_instr_i[1].rs1];
-          updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_i[decoded_instr_i[1].rs2] : is_result_available_gpr_i[decoded_instr_i[1].rs2];
-          if (NR_READ_PORTS == 3 && !decoded_instr_i[1].use_imm)
-            updated_regs[i][2] = is_imm_fpr(decoded_instr_i[1].op) ? is_result_available_fpr_i[decoded_instr_i[1].result] : is_result_available_gpr_i[decoded_instr_i[1].result];
+        if (|allocated) begin
+          for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+            if (allocated[j]) begin
+              updated_regs[i][0] = is_rs1_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_i[decoded_instr_i[j].rs1] : is_result_available_gpr_i[decoded_instr_i[j].rs1];
+              updated_regs[i][1] = is_rs2_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_i[decoded_instr_i[j].rs2] : is_result_available_gpr_i[decoded_instr_i[j].rs2];
+              if (NR_READ_PORTS == 3 && !decoded_instr_i[j].use_imm)
+                updated_regs[i][2] = is_imm_fpr(decoded_instr_i[j].op) ? is_result_available_fpr_i[decoded_instr_i[j].result] : is_result_available_gpr_i[decoded_instr_i[j].result];
+            end
+          end
         end else begin
           updated_regs[i][0] = rs_q.valid_regs[i][0];
           updated_regs[i][1] = rs_q.valid_regs[i][1];
@@ -507,19 +506,20 @@ module reservation_station
           automatic logic v;
           v = speculative_updated_regs[i][r] ? 1'b1 :
               forwarding_updated_regs[i][r]  ? 1'b1 : updated_regs[i][r];
-          if (allocated_by_p1 && !RAW_updated_regs[i][r]) v = 1'b0;
+          if (!RAW_updated_regs[i][r]) v = 1'b0;
           rs_n.valid_regs[i][r] = v;
         end
       end
 
       //ultimately we check immediate state
       if (NR_READ_PORTS == 3) begin
-        if (allocated_by_p0) begin
-          if (decoded_instr_i[0].use_imm == 1'b1)
-            rs_n.valid_regs[i][2] = 1'b1;
-        end else if (allocated_by_p1) begin
-          if (decoded_instr_i[1].use_imm == 1'b1)
-            rs_n.valid_regs[i][2] = 1'b1;
+        if (|allocated) begin
+          for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+            if (allocated[j]) begin
+              if (decoded_instr_i[j].use_imm == 1'b1)
+                rs_n.valid_regs[i][2] = 1'b1;
+            end
+          end
         end else begin
           if (rs_q.rs_table[i].use_imm == 1'b1)
             rs_n.valid_regs[i][2] = 1'b1;
@@ -527,12 +527,11 @@ module reservation_station
       end
 
       //exception were triggered in the earlier stages of the pipeline
-      if (allocated_by_p0) begin
-        if (decoded_instr_i[0].ex.valid || decoded_instr_i[0].fu == NONE)
-          rs_n.valid_regs[i] = '1;
-      end else if (allocated_by_p1) begin
-        if (decoded_instr_i[1].ex.valid || decoded_instr_i[1].fu == NONE)
-          rs_n.valid_regs[i] = '1;
+      if (|allocated) begin
+        for (int j = 0; j < CVA6Cfg.NrIssuePorts; j++) begin
+          if (decoded_instr_i[j].ex.valid || decoded_instr_i[j].fu == NONE)
+            rs_n.valid_regs[i] = '1;
+        end
       end else begin
         if (rs_q.rs_table[i].ex_valid || rs_q.rs_table[i].fu == NONE)
           rs_n.valid_regs[i] = '1;
@@ -557,7 +556,6 @@ module reservation_station
   end
 
   // pragma translate_off
-  // Événements lus par l'instrumentation de issue_stage
   logic [CVA6Cfg.NrIssuePorts-1:0] perf_alloc, perf_ft;
 
   always_comb begin

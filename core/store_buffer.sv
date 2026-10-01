@@ -167,6 +167,23 @@ module store_buffer
   assert property (@(posedge clk_i) rst_ni && (commit_status_cnt_q == DEPTH_COMMIT) |-> !commit_i)
   else $error("[Commit Queue] You are trying to commit a store although the buffer is full");
   //pragma translate_on
+
+  // pragma translate_off
+  longint unsigned c_sb_req, c_sb_gnt, c_sb_occ, c_sb_stall, c_sb_full;
+  always_ff @(posedge clk_i) if (rst_ni && OoO_perf_pkg::window) begin
+    c_sb_occ += commit_status_cnt_q;                                  // occupation cumulée (Little)
+    if (req_port_o.data_req)                          c_sb_req++;     // un store attend le cache
+    if (req_port_o.data_req && req_port_i.data_gnt)   c_sb_gnt++;     // un store est parti
+    if (commit_queue_q[commit_read_pointer_q].valid && stall_st_pending_i)
+                                                      c_sb_stall++;   // bloqué par stall_st_pending
+    if (commit_status_cnt_q == DEPTH_COMMIT)          c_sb_full++;    // commit_ready_o = 0
+  end
+  final $display("store_buffer : stores envoyes=%0d  cycles/store en tete=%0.2f  temps moyen dans le buffer=%0.2f  stall_pending=%0d  plein=%0d",
+                 c_sb_gnt,
+                 c_sb_gnt ? real'(c_sb_req) / real'(c_sb_gnt) : 0.0,
+                 c_sb_gnt ? real'(c_sb_occ) / real'(c_sb_gnt) : 0.0,
+                 c_sb_stall, c_sb_full);
+  // pragma translate_on
 endmodule
 
 

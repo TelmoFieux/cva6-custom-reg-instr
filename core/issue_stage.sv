@@ -198,7 +198,7 @@ module issue_stage
 
   // In superscalar mode they are doubled so we divide it by two to get the number of operand max
   // per instr
-  localparam int unsigned NR_READ_PORTS = CVA6Cfg.NrRgprPorts / 2;
+  localparam int unsigned NR_READ_PORTS = CVA6Cfg.SuperscalarEn ? CVA6Cfg.NrRgprPorts / 2 : CVA6Cfg.NrRgprPorts;
 
   typedef logic [(NR_READ_PORTS == 3 ? CVA6Cfg.XLEN : CVA6Cfg.FLen)-1:0] rs3_len_t;
   typedef struct packed {
@@ -449,7 +449,7 @@ module issue_stage
   // 2. Update available results
   // ---------------------------------------------------------
 
-  localparam int unsigned NR_WB = (CVA6Cfg.CvxifEn) ? 3 : 2;
+  localparam int unsigned NR_WB = 1 + CVA6Cfg.FpPresent + CVA6Cfg.SuperscalarEn + CVA6Cfg.CvxifEn;
 
   typedef struct packed {
     fu_t fu;
@@ -600,12 +600,16 @@ module issue_stage
     rs_we = '0;
 
     for (int unsigned i = 0; i< CVA6Cfg.NrIssuePorts; i++ ) begin
-      if (decoded_instr_i[i].fu == ALU) begin
 
-        if (i == 0 || decoded_instr_i[0].fu != ALU) begin
-          rs_we[FPU_ALU2][i] = 1'b1;
+      if (decoded_instr_i[i].fu == ALU) begin
+        if (CVA6Cfg.NrIssuePorts > 1) begin
+          if (i == 0 || decoded_instr_i[0].fu != ALU) begin
+            rs_we[FPU_ALU2][i] = 1'b1;
+          end else begin
+            rs_we[FLU][i]      = 1'b1;
+          end
         end else begin
-          rs_we[FLU][i]      = 1'b1;
+          rs_we[FLU][i] = 1'b1;
         end
       end
 
@@ -671,6 +675,7 @@ module issue_stage
         .rst_ni                     (rst_ni),
         .full_o                     (rs_full_o),
         .we_i                       (we_i),
+        .mult_valid_i               (mult_valid_o),
         .rm_i                       (rm_i),
         .rm_id_i                    (rm_id_i),
         .rm_op_i                    (rm_op_i),
@@ -909,7 +914,7 @@ module issue_stage
   assign tournament_candidates = {lsq_dispatch_instr_trans_id, rs_trans_id};
   assign tournament_data = {lsq_early_data, rs_early_data};
   assign tournament_is_ft = {CVA6Cfg.NrIssuePorts'(0) ,rs_is_ft};
-  assign tournament_ft_src = {CVA6Cfg.NrCommitPorts'(0), rs_ft_src};
+  assign tournament_ft_src = {CVA6Cfg.NrIssuePorts'(0), rs_ft_src};
 
   for (genvar i = 0 ; i < TOURNAMENT_SIZE ; i++) begin
     if (i < NR_WB) begin
@@ -990,18 +995,24 @@ module issue_stage
 
     issue_instr_valid_sb_iro = '0;
 
-    if (tournament_data[winner[0]].fu == CSR || tournament_data[winner[1]].fu == CSR) begin
-      issue_instr_valid_sb_iro[0] = tree_valid[0];
-      issue_instr_valid_sb_iro[1] = 1'b0;
-      issue_instr_sb_iro = issue_instr_merged;
-      issue_lsq_data[0] = tree_lsq_data[0];
-    end else if (tournament_data[winner[1]].fu == CVXIF) begin
-      issue_instr_sb_iro[0] = issue_instr_merged[1];
-      issue_instr_sb_iro[1] = issue_instr_merged[0];
-      issue_instr_valid_sb_iro[0] = tree_valid[1];
-      issue_instr_valid_sb_iro[1] = tree_valid[0];
-      issue_lsq_data[0] = tree_lsq_data[1];
-      issue_lsq_data[1] = tree_lsq_data[0];
+    if (CVA6Cfg.NrIssuePorts > 1) begin
+      if (tournament_data[winner[0]].fu == CSR || tournament_data[winner[1]].fu == CSR) begin
+        issue_instr_valid_sb_iro[0] = tree_valid[0];
+        issue_instr_valid_sb_iro[1] = 1'b0;
+        issue_instr_sb_iro = issue_instr_merged;
+        issue_lsq_data[0] = tree_lsq_data[0];
+      end else if (tournament_data[winner[1]].fu == CVXIF) begin
+        issue_instr_sb_iro[0] = issue_instr_merged[1];
+        issue_instr_sb_iro[1] = issue_instr_merged[0];
+        issue_instr_valid_sb_iro[0] = tree_valid[1];
+        issue_instr_valid_sb_iro[1] = tree_valid[0];
+        issue_lsq_data[0] = tree_lsq_data[1];
+        issue_lsq_data[1] = tree_lsq_data[0];
+      end else begin
+        issue_instr_sb_iro = issue_instr_merged;
+        issue_instr_valid_sb_iro = tree_valid;
+        issue_lsq_data = tree_lsq_data;
+      end
     end else begin
       issue_instr_sb_iro = issue_instr_merged;
       issue_instr_valid_sb_iro = tree_valid;
@@ -1196,9 +1207,39 @@ module issue_stage
       tree_valid[i] |-> issue_instr_sb[i].global_rs_id == tournament_seq_num[winner[i]])
     else $error("SB et arbre incoherents, port %0d", i);
 
-    assert property (@(posedge clk_i) disable iff (!rst_ni) tree_valid[i] |-> issue_instr_merged[i] == issue_instr_sb[i])
-    else $error("instr_merged does not have correcte values");
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+      winner_valid[i] |-> !$isunknown(winner[i]))
+    else $error("winner[%0d] inconnu @%0t", i, $time);
+
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+      tree_valid[i] |->
+          issue_instr_merged[i].rs1          === issue_instr_sb[i].rs1
+        && issue_instr_merged[i].rs2          === issue_instr_sb[i].rs2
+        && issue_instr_merged[i].rd           === issue_instr_sb[i].rd
+        && issue_instr_merged[i].fu           === issue_instr_sb[i].fu
+        && issue_instr_merged[i].op           === issue_instr_sb[i].op
+        && issue_instr_merged[i].use_imm      === issue_instr_sb[i].use_imm
+        && issue_instr_merged[i].global_rs_id === issue_instr_sb[i].global_rs_id
+        && issue_instr_merged[i].trans_id     === issue_instr_sb[i].trans_id)
+    else begin
+      $error("merged != sb port %0d @%0t", i, $time);
+      $display("  winner=%0d src=%s tid=%0d issued=%b",
+        winner[i], (winner[i] < NR_WB) ? "RS" : "LSQ", tree_results[i],
+        i_scoreboard.mem_q[tree_results[i]].issued);
+      $display("  rs1 %0d/%0d  rs2 %0d/%0d  rd %0d/%0d  fu %0d/%0d  op %0d/%0d  imm %b/%b  gid %0d/%0d  tid %0d/%0d",
+        issue_instr_merged[i].rs1, issue_instr_sb[i].rs1,
+        issue_instr_merged[i].rs2, issue_instr_sb[i].rs2,
+        issue_instr_merged[i].rd,  issue_instr_sb[i].rd,
+        issue_instr_merged[i].fu,  issue_instr_sb[i].fu,
+        issue_instr_merged[i].op,  issue_instr_sb[i].op,
+        issue_instr_merged[i].use_imm, issue_instr_sb[i].use_imm,
+        issue_instr_merged[i].global_rs_id, issue_instr_sb[i].global_rs_id,
+        issue_instr_merged[i].trans_id, issue_instr_sb[i].trans_id);
+    end
+
   end
+
+
 
   assert property (@(posedge clk_i) disable iff (!rst_ni)
     wt_valid_i[LOAD_WB] && !flush_i |-> wb_valid_o[LOAD_WB])
@@ -1214,7 +1255,10 @@ module issue_stage
     rollback_en_o |-> !(|decoded_instr_ack_o))
   else $error("ack pendant un rollback");
 
-
+  initial begin
+    assert (!(CVA6Cfg.FpPresent | CVA6Cfg.CvxifEn))
+    else $fatal(1, "FPU and CVXIF not supported in out of order mode");
+  end
   // =====================================================================
   //  Instrumentation performance (simulation uniquement)
   //
@@ -1257,17 +1301,29 @@ module issue_stage
     void'($value$plusargs("pc_hi=%h",          pc_hi));
   end
 
-  logic measure_en;
-  assign measure_en = (commit_instr_o[0].pc >= pc_lo) && (commit_instr_o[0].pc < pc_hi);
-
   // ---- signaux internes des RS (RS0 = FLU, RS1 = ALU2)
+
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_we;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_full_raw;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_alloc;
+  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_ft;
+
   wire [CVA6Cfg.NrIssuePorts-1:0] rs0_we       = gen_rs_blocks[0].rs_instance.we_i;
-  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_we       = gen_rs_blocks[1].rs_instance.we_i;
-  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_full_raw = gen_rs_blocks[1].rs_instance.rs_full_o;
+
+  if (CVA6Cfg.SuperscalarEn) begin
+    assign rs1_we       = (CVA6Cfg.NrIssuePorts > 1) ? gen_rs_blocks[1].rs_instance.we_i : '0;
+    assign rs1_full_raw = (CVA6Cfg.NrIssuePorts > 1) ? gen_rs_blocks[1].rs_instance.rs_full_o : '0;
+    assign rs1_alloc    = (CVA6Cfg.NrIssuePorts > 1) ? gen_rs_blocks[1].rs_instance.i_reservation_station.perf_alloc : '0;
+    assign rs1_ft       = (CVA6Cfg.NrIssuePorts > 1) ? gen_rs_blocks[1].rs_instance.i_reservation_station.perf_ft : '0;
+  end else begin
+    assign rs1_we       = '0;
+    assign rs1_full_raw = '0;
+    assign rs1_alloc    = '0;
+    assign rs1_ft       = '0;
+  end
+
   wire [CVA6Cfg.NrIssuePorts-1:0] rs0_alloc    = gen_rs_blocks[0].rs_instance.i_reservation_station.perf_alloc;
   wire [CVA6Cfg.NrIssuePorts-1:0] rs0_ft       = gen_rs_blocks[0].rs_instance.i_reservation_station.perf_ft;
-  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_alloc    = gen_rs_blocks[1].rs_instance.i_reservation_station.perf_alloc;
-  wire [CVA6Cfg.NrIssuePorts-1:0] rs1_ft       = gen_rs_blocks[1].rs_instance.i_reservation_station.perf_ft;
 
   // ---- suivi des write-backs MUL
   logic                            mul_wb_d, mul_wb_q2;
@@ -1373,7 +1429,7 @@ module issue_stage
 
     if (rst_ni) all_cycles++;
 
-    if (rst_ni && measure_en) begin
+    if (rst_ni && OoO_perf_pkg::window) begin
       for (int i = 0; i < CVA6Cfg.NrIssuePorts;  i++) if (rm_i[i])         n_iss++;
       for (int i = 0; i < CVA6Cfg.NrCommitPorts; i++) if (commit_ack_i[i]) n_com++;
 

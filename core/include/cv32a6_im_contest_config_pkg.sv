@@ -19,7 +19,7 @@ package cva6_config_pkg;
   localparam CVA6ConfigFVecEn = 0;
 
   localparam CVA6ConfigCvxifEn = 0;
-  localparam CVA6ConfigCExtEn = 1;
+  localparam CVA6ConfigCExtEn = 0;
   localparam CVA6ConfigZcbExtEn = 0;
   localparam CVA6ConfigZcmpExtEn = 0;
   localparam CVA6ConfigAExtEn = 0;
@@ -71,11 +71,11 @@ package cva6_config_pkg;
 
   // OoO parameters
   localparam CVA6ConfigRegAddrWidth = 6;
-  localparam CVA6ConfigNrPhysReg = 44;
+  localparam CVA6ConfigNrPhysReg = 48;
   localparam CVA6ConfigGlobalRsIdWidth = 6;
-  localparam CVA6ConfigRollbackWidth = 4;
+  localparam CVA6ConfigRollbackWidth = 8;
   // same size for store and load queue
-  localparam CVA6ConfigNrLSQEntries = 8;
+  localparam CVA6ConfigNrLSQEntries = 4;
   localparam CVA6ConfigNrLSQBypassEntries = 4;
 
   localparam config_pkg::cva6_user_cfg_t cva6_cfg = '{
@@ -84,7 +84,7 @@ package cva6_config_pkg;
       FpgaEn: bit'(1),  // for Xilinx and Altera
       FpgaAlteraEn: bit'(0),  // for Altera (only)
       TechnoCut: bit'(0),
-      SuperscalarEn: bit'(1),
+      SuperscalarEn: bit'(0),
       NrCommitPorts: unsigned'(1),
       AxiAddrWidth: unsigned'(CVA6ConfigAxiAddrWidth),
       AxiDataWidth: unsigned'(CVA6ConfigAxiDataWidth),
