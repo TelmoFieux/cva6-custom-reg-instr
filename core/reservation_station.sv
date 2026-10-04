@@ -73,8 +73,8 @@ module reservation_station
 
   localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
-  function automatic logic fu_blocked(fu_t fu);
-    return |mult_valid_i && (fu inside {CTRL_FLOW, CSR} || (fu == ALU && !CVA6Cfg.SuperscalarEn));
+  function automatic logic fu_blocked(logic blocked, fu_t fu);
+    return blocked && (fu inside {CTRL_FLOW, CSR} || (fu == ALU && !CVA6Cfg.SuperscalarEn));
   endfunction
 
   typedef struct packed {
@@ -179,10 +179,13 @@ module reservation_station
   assign tournament_candidates = rs_q.rs_table;
   assign tournament_valid_regs = rs_q.valid_regs;
 
+  logic flu_blocked;
+  assign flu_blocked = |mult_valid_i;
+
   for (genvar i = 0 ; i < NR_RS_ENTRIES ; i++) begin
-    assign tournament_valid[i] = !rs_q.free_entries[i] &&
-      (rs_q.valid_regs[i] == '1 || rs_q.rs_table[i].fu == CSR)
-      && !fu_blocked(rs_q.rs_table[i].fu);
+    assign tournament_valid[i] = !rs_q.free_entries[i]
+      && ((rs_q.valid_regs[i] == '1 && !fu_blocked(flu_blocked, rs_q.rs_table[i].fu))
+        || rs_q.rs_table[i].fu == CSR);
     assign tournament_seq_num[i] = rs_q.rs_table[i].global_rs_id;
     assign tournament_id[i] = i;
   end
@@ -218,7 +221,7 @@ module reservation_station
   if (FALLTHROUGH) begin
     for (genvar i = 0; i < CVA6Cfg.NrIssuePorts; i++)
       assign fallthrough_valid[i] = we_i[i] && decoded_instr_valid_i[i] && !empty_mask[i]
-                        && fallthrough_valid_regs[i] == '1 && decoded_instr_i[i].fu != CSR && !fu_blocked(decoded_instr_i[i].fu);;
+                        && fallthrough_valid_regs[i] == '1 && decoded_instr_i[i].fu != CSR && !fu_blocked(flu_blocked, decoded_instr_i[i].fu);
   end else begin
     assign fallthrough_valid = '0;
   end

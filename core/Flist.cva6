@@ -72,6 +72,7 @@ ${CVA6_REPO_DIR}/core/include/std_cache_pkg.sv
 ${CVA6_REPO_DIR}/core/include/instr_tracer_pkg.sv
 ${CVA6_REPO_DIR}/core/include/build_config_pkg.sv
 ${CVA6_REPO_DIR}/core/OoO_perf_window.sv
+${CVA6_REPO_DIR}/core/tohost_monitor.sv
 
 //CVXIF
 ${CVA6_REPO_DIR}/core/cvxif_compressed_if_driver.sv

@@ -1,0 +1,58 @@
+FAIL(sous-test 668) rv32ua-p-amoadd_w
+FAIL(sous-test 668) rv32ua-p-amoand_w
+FAIL(sous-test 668) rv32ua-p-amomaxu_w
+FAIL(sous-test 668) rv32ua-p-amomax_w
+FAIL(sous-test 668) rv32ua-p-amominu_w
+FAIL(sous-test 668) rv32ua-p-amomin_w
+FAIL(sous-test 668) rv32ua-p-amoor_w
+FAIL(sous-test 668) rv32ua-p-amoswap_w
+FAIL(sous-test 668) rv32ua-p-amoxor_w
+FAIL(sous-test 668) rv32ua-p-lrsc
+PASS rv32uc-p-rvc
+PASS rv32ui-p-add
+PASS rv32ui-p-addi
+PASS rv32ui-p-and
+PASS rv32ui-p-andi
+PASS rv32ui-p-auipc
+PASS rv32ui-p-beq
+PASS rv32ui-p-bge
+PASS rv32ui-p-bgeu
+PASS rv32ui-p-blt
+PASS rv32ui-p-bltu
+PASS rv32ui-p-bne
+PASS rv32ui-p-fence_i
+PASS rv32ui-p-jal
+PASS rv32ui-p-jalr
+PASS rv32ui-p-lb
+PASS rv32ui-p-lbu
+PASS rv32ui-p-lh
+PASS rv32ui-p-lhu
+PASS rv32ui-p-lui
+PASS rv32ui-p-lw
+PASS rv32ui-p-or
+PASS rv32ui-p-ori
+PASS rv32ui-p-sb
+PASS rv32ui-p-sh
+PASS rv32ui-p-simple
+PASS rv32ui-p-sll
+PASS rv32ui-p-slli
+PASS rv32ui-p-slt
+PASS rv32ui-p-slti
+PASS rv32ui-p-sltiu
+PASS rv32ui-p-sltu
+PASS rv32ui-p-sra
+PASS rv32ui-p-srai
+PASS rv32ui-p-srl
+PASS rv32ui-p-srli
+PASS rv32ui-p-sub
+PASS rv32ui-p-sw
+PASS rv32ui-p-xor
+PASS rv32ui-p-xori
+PASS rv32um-p-div
+PASS rv32um-p-divu
+PASS rv32um-p-mul
+PASS rv32um-p-mulh
+PASS rv32um-p-mulhsu
+PASS rv32um-p-mulhu
+PASS rv32um-p-rem
+PASS rv32um-p-remu

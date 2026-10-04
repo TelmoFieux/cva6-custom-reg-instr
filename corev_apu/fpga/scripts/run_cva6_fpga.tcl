@@ -93,7 +93,7 @@ if { $::env(PS7_DDR) == 1 } {
    puts "None of the values is matching"
 }
 
-set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING off [get_runs synth_1]
+set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING on [get_runs synth_1]
 # set_property "steps.synth_design.args.directive" "AlternateRoutability" [get_runs synth_1]
 # set_property "steps.synth_design.args.directive" "PerformanceOptimized" [get_runs synth_1]
 # set_property "steps.synth_design.args.directive" "AreaOptimized_high" [get_runs synth_1]

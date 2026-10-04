@@ -640,6 +640,9 @@ module issue_stage
 
     if (is_rs_instanciated) begin : rs_instance
       logic [CVA6Cfg.NrIssuePorts-1:0] we_i;
+      logic [CVA6Cfg.NrIssuePorts-1:0] mult_valid;
+
+      assign mult_valid = mult_valid_o;
 
       assign we_i = rs_we[fu];
 
@@ -675,7 +678,7 @@ module issue_stage
         .rst_ni                     (rst_ni),
         .full_o                     (rs_full_o),
         .we_i                       (we_i),
-        .mult_valid_i               (mult_valid_o),
+        .mult_valid_i               (mult_valid),
         .rm_i                       (rm_i),
         .rm_id_i                    (rm_id_i),
         .rm_op_i                    (rm_op_i),

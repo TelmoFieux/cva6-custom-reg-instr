@@ -50,11 +50,21 @@ module register_allocation_table
   localparam NUM_REG = CVA6Cfg.NrPhysReg;
 
   //keeps track of free physical registers
-  logic [CVA6Cfg.NrIssuePorts:0][NUM_REG-1:0] free_regs_masked;
-  logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0] alloc_idx;
-  logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask;
+  logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0] alloc_idx_n, alloc_idx_q;
+  logic [CVA6Cfg.NrIssuePorts:0][NUM_REG-1:0] free_regs_masked_prealloc, free_regs_masked_alloc;
+  logic [CVA6Cfg.NrIssuePorts-1:0] empty_mask_n, empty_mask_q;
 
-  assign free_regs_masked[0] = rat_q.free_regs;
+  logic [NUM_REG-1:0] base_free;
+
+  always_comb begin
+    base_free = rat_q.free_regs;
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++)
+      if (!empty_mask_q[i]) base_free[alloc_idx_q[i]] = 1'b0;
+  end
+
+  assign free_regs_masked_prealloc[0] = base_free;
+
+  assign free_regs_masked_alloc[0] = rat_q.free_regs;
 
   //priority encoder cascade to get index for each instr
   if (!COMMIT_RAT) begin
@@ -63,23 +73,44 @@ module register_allocation_table
             .WIDTH(NUM_REG),
             .MODE(1'b0))
         i_lzc (
-            .in_i   (free_regs_masked[i]),
-            .cnt_o  (alloc_idx[i]),
-            .empty_o(empty_mask[i])
+            .in_i   (free_regs_masked_prealloc[i]),
+            .cnt_o  (alloc_idx_n[i]),
+            .empty_o(empty_mask_n[i])
         );
 
-        assign free_regs_masked[i+1] = (we_i[i] && decoded_instr_valid_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) ?
-          (free_regs_masked[i] & ~(NUM_REG'(1) << alloc_idx[i])) :
-          free_regs_masked[i];
+        assign free_regs_masked_prealloc[i+1] = free_regs_masked_prealloc[i] & ~(NUM_REG'(1) << alloc_idx_n[i]);
+
+        assign free_regs_masked_alloc[i+1] = (we_i[i] && decoded_instr_valid_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask_q[i]) ?
+          (free_regs_masked_alloc[i] & ~(NUM_REG'(1) << alloc_idx_q[i])) :
+          free_regs_masked_alloc[i];
     end
 
-    assign empty_o = empty_mask;
+
+    assign empty_o = empty_mask_q;
 
   end else begin
     assign empty_o = '0;
-    assign free_regs_masked[CVA6Cfg.NrIssuePorts] = rat_q.free_regs;
+    assign free_regs_masked_alloc[CVA6Cfg.NrIssuePorts] = rat_q.free_regs;
+    assign free_regs_masked_prealloc[CVA6Cfg.NrIssuePorts] = rat_q.free_regs;
   end
 
+  logic [CVA6Cfg.NrIssuePorts-1:0][ADDR_WIDTH-1:0] cand_d;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                 empty_d;
+
+  always_comb begin : update_prealloc_reg
+    automatic int k = 0;
+    cand_d  = alloc_idx_q;
+    empty_d = empty_mask_q;
+    for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
+      automatic logic used = we_i[i] && decoded_instr_ack_i[i] && decoded_instr_i[i].rd != '0 && !empty_mask_q[i];
+      if (used || empty_mask_q[i]) begin
+        cand_d[i]  = alloc_idx_n[k];
+        empty_d[i] = empty_mask_n[k];
+        k++;
+      end
+    end
+    if (rat_restore_en_i) empty_d = '1;
+  end
 
   // RAT of size nb register i.e 32 containing adress of physical register
   rat_table_t rat_n, rat_q;
@@ -90,8 +121,8 @@ module register_allocation_table
 
     if (!COMMIT_RAT) begin
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
-          rat_n.free_regs = free_regs_masked[i+1];
+        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask_q[i]) begin
+          rat_n.free_regs = free_regs_masked_alloc[i+1];
         end
       end
     end
@@ -101,19 +132,19 @@ module register_allocation_table
       renamed_instr_o[i].arch_rd = decoded_instr_i[i].rd;
 
       // Renaming destination
-      if (we_i[i] && decoded_instr_valid_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
+      if (we_i[i] && decoded_instr_valid_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask_q[i]) begin
         //check WAW hazard
         if (CVA6Cfg.NrIssuePorts > 1) begin
           if (i > 0 && we_i[i-1] && decoded_instr_valid_i[i-1] &&
             decoded_instr_i[i].rd == decoded_instr_i[i-1].rd) begin
-            renamed_instr_o[i].old_phys = alloc_idx[i-1];
+            renamed_instr_o[i].old_phys = alloc_idx_q[i-1];
           end else begin
             renamed_instr_o[i].old_phys = rat_q.rat[decoded_instr_i[i].rd];
           end
         end else begin
           renamed_instr_o[i].old_phys = rat_q.rat[decoded_instr_i[i].rd];
         end
-        renamed_instr_o[i].rd = alloc_idx[i];
+        renamed_instr_o[i].rd = alloc_idx_q[i];
       end else begin
         renamed_instr_o[i].old_phys = decoded_instr_i[i].rd;
       end
@@ -126,9 +157,9 @@ module register_allocation_table
         raw_rs1 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].rs1 == decoded_instr_i[i-1].rd);
         raw_rs2 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].rs2 == decoded_instr_i[i-1].rd);
         renamed_instr_o[i].rs1 = (i == 0) ? rat_q.rat[decoded_instr_i[i].rs1] :
-                                raw_rs1  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].rs1];
+                                raw_rs1  ? alloc_idx_q[i-1] : rat_q.rat[decoded_instr_i[i].rs1];
         renamed_instr_o[i].rs2 = (i == 0) ? rat_q.rat[decoded_instr_i[i].rs2] :
-                                raw_rs2  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].rs2];
+                                raw_rs2  ? alloc_idx_q[i-1] : rat_q.rat[decoded_instr_i[i].rs2];
       end else begin
         //single issue mode
         renamed_instr_o[i].rs1 = rat_q.rat[decoded_instr_i[i].rs1];
@@ -142,7 +173,7 @@ module register_allocation_table
           //superscalar mode
           raw_rs3 = (i > 0) && we_i[i-1] && (decoded_instr_i[i-1].rd != '0) && (decoded_instr_i[i].result == decoded_instr_i[i-1].rd);
           renamed_instr_o[i].result = (i == 0) ? rat_q.rat[decoded_instr_i[i].result] :
-                                     raw_rs3  ? alloc_idx[i-1] : rat_q.rat[decoded_instr_i[i].result];
+                                     raw_rs3  ? alloc_idx_q[i-1] : rat_q.rat[decoded_instr_i[i].result];
         end else begin
           //single issue mode
           raw_rs3 = '0;
@@ -167,8 +198,8 @@ module register_allocation_table
         end
       end
       for (int i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
-        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask[i]) begin
-          rat_n.rat[decoded_instr_i[i].rd] = alloc_idx[i];
+        if (we_i[i] && decoded_instr_ack_i[i] && (decoded_instr_i[i].rd != '0) && !empty_mask_q[i]) begin
+          rat_n.rat[decoded_instr_i[i].rd] = alloc_idx_q[i];
         end
       end
     end
@@ -195,11 +226,15 @@ module register_allocation_table
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
+      empty_mask_q <= '1;
+      alloc_idx_q <= '0;
       rat_q.free_regs <= NUM_REG'('1) << 32;
       for (int i = 0; i < 32; i++) begin
         rat_q.rat[i] <= ADDR_WIDTH'(i);
       end
     end else begin
+      alloc_idx_q  <= cand_d;
+      empty_mask_q <= empty_d;
       rat_q <= rat_n;
     end
   end
